@@ -1,9 +1,15 @@
-import React, {useState, useEffect} from 'react';
+import React, {useState, useEffect, useCallback} from 'react';
 import {
   StyleSheet,
   ImageBackground,
   ScrollView,
+  BackHandler,
 } from 'react-native';
+import {
+  useTVEventHandler,
+  useKeplerBackHandler,
+  HWEvent,
+} from '@amazon-devices/react-native-kepler';
 import {RoomProvider} from './context/RoomContext';
 import {ContentCategory, MediaItem} from './types/catalog';
 import {fallbackCategories, fallbackMediaItems} from './data/catalogData';
@@ -25,6 +31,68 @@ export const LivingFrameHome = () => {
   );
   const [detailsModalItem, setDetailsModalItem] = useState<MediaItem | null>(null);
   const [recapModalItem, setRecapModalItem] = useState<MediaItem | null>(null);
+
+  const keplerBackHandler = useKeplerBackHandler();
+
+  const handleExitApp = useCallback(() => {
+    if (keplerBackHandler && typeof keplerBackHandler.exitApp === 'function') {
+      keplerBackHandler.exitApp();
+    } else if (BackHandler && typeof BackHandler.exitApp === 'function') {
+      BackHandler.exitApp();
+    }
+  }, [keplerBackHandler]);
+
+  // Handle remote Home button to exit the entire app and return homescreen
+  useTVEventHandler((evt: HWEvent) => {
+    if (!evt || !evt.eventType) {
+      return;
+    }
+    const eventType = evt.eventType.toLowerCase();
+    if (
+      eventType === 'home' ||
+      eventType === 'root_menu' ||
+      eventType === 'media_top_menu' ||
+      eventType.includes('home')
+    ) {
+      setDetailsModalItem(null);
+      setRecapModalItem(null);
+      handleExitApp();
+    }
+  });
+
+  // Handle remote Back button:
+  // - If modal is open, dismiss modal
+  // - If at root screen, exit entire app and return to homescreen
+  useEffect(() => {
+    const onBackPress = () => {
+      if (detailsModalItem || recapModalItem) {
+        setDetailsModalItem(null);
+        setRecapModalItem(null);
+        return true;
+      }
+      handleExitApp();
+      return true;
+    };
+
+    let removeSub: (() => void) | undefined;
+    if (keplerBackHandler && typeof keplerBackHandler.addEventListener === 'function') {
+      const sub = keplerBackHandler.addEventListener('hardwareBackPress', onBackPress);
+      if (sub && typeof sub.remove === 'function') {
+        removeSub = () => sub.remove();
+      }
+    } else if (BackHandler && typeof BackHandler.addEventListener === 'function') {
+      const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      if (sub && typeof sub.remove === 'function') {
+        removeSub = () => sub.remove();
+      }
+    }
+
+    return () => {
+      if (removeSub) {
+        removeSub();
+      }
+    };
+  }, [detailsModalItem, recapModalItem, handleExitApp, keplerBackHandler]);
 
   // Fetch verified catalog updates on load
   useEffect(() => {

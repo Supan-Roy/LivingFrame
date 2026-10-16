@@ -61,25 +61,85 @@ export class CatalogService {
         };
       }
 
+      // Filter out developer garbage, hackathons, and unwanted OS/CLI artifacts
+      const isCleanItem = (item: RemoteCatalogItem) => {
+        const id = (item.id || '').toLowerCase();
+        const title = (item.title || '').toLowerCase();
+        const desc = (item.description || '').toLowerCase();
+        const poster = (item.images?.poster_16x9 || '').toLowerCase();
+
+        if (
+          id.includes('adbt') ||
+          id.includes('hackathon') ||
+          title.includes('adbt') ||
+          title.includes('hackathon') ||
+          desc.includes('npx command') ||
+          desc.includes('vega os') ||
+          desc.includes('amazon devices') ||
+          desc.includes('fire tv') ||
+          desc.includes('hackathon') ||
+          poster.includes('adbt-quest')
+        ) {
+          return false;
+        }
+        return true;
+      };
+
+      const cleanSourceItems = data.items.filter(isCleanItem);
+      const itemsToProcess = cleanSourceItems.length > 0 ? cleanSourceItems : [];
+
+      const sanitizeText = (text: string) => {
+        return text
+          .replace(/Vega OS/gi, 'LivingFrame TV')
+          .replace(/Vega 4/gi, 'Cosmos 4')
+          .replace(/on Vega\b/gi, 'on TV')
+          .replace(/Amazon Devices/gi, 'Smart Displays')
+          .replace(/Fire TV/gi, 'Living Room TV');
+      };
+
+      const cleanCategory = (cat?: string, genres?: string[]) => {
+        if (genres && genres.length > 0) {
+          return genres[0];
+        }
+        if (
+          !cat ||
+          cat === 'General' ||
+          cat.toLowerCase().includes('studio') ||
+          cat.toLowerCase().includes('channel') ||
+          cat.toLowerCase().includes('waiting')
+        ) {
+          return 'Cinema';
+        }
+        return cat;
+      };
+
+      const getRealisticDuration = (item: RemoteCatalogItem) => {
+        if (item.duration_sec && item.duration_sec >= 300) {
+          return item.duration_sec;
+        }
+        const charCodeSum = item.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+        return 4800 + (charCodeSum % 20) * 120; // ~1h 20m to 1h 58m
+      };
+
       // Map remote items safely
-      const remoteItems: MediaItem[] = data.items.map((item) => {
+      const remoteItems: MediaItem[] = itemsToProcess.map((item) => {
         const videoSource = item.sources?.find((s) => s.type === 'mp4') || item.sources?.[0];
         return {
           id: item.id,
-          title: item.title,
-          category: item.category || 'General',
+          title: sanitizeText(item.title),
+          category: cleanCategory(item.category, item.genres),
           genres: item.genres || ['Entertainment'],
-          description: item.description || '',
+          description: sanitizeText(item.description || ''),
           posterUrl:
             item.images?.poster_16x9 ||
             fallbackMediaItems[0].posterUrl,
-          releaseYear: item.release_year || 2026,
+          releaseYear: item.release_year || 2024,
           ratingStars: item.rating_stars || 4.5,
           contentRating: item.content_rating || 'TV-G',
-          durationSec: item.duration_sec || 3600,
+          durationSec: getRealisticDuration(item),
           trending: item.trending ?? false,
           videoUrl: videoSource?.url,
-          aiContextHint: 'LivingFrame Room Sensor synced.',
+          aiContextHint: 'Room Presence Active',
         };
       });
 

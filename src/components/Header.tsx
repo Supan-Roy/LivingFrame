@@ -1,23 +1,10 @@
-import React, {useState, useEffect} from 'react';
-import {StyleSheet, Text, View, Image} from 'react-native';
+import React from 'react';
+import {StyleSheet, Text, View} from 'react-native';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
 
 export const Header = () => {
   const {roomState} = useRoom();
-  const [timeString, setTimeString] = useState<string>('');
-
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      setTimeString(
-        now.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}),
-      );
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 15000);
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <View style={styles.headerContainer}>
@@ -27,15 +14,15 @@ export const Header = () => {
           <Text style={styles.logoIcon}>❖</Text>
         </View>
         <View style={styles.wordmarkContainer}>
-          <Text style={styles.wordmarkTitle}>
+          <Text style={styles.wordmarkTitle} testID="header-brand-title">
             LIVING<Text style={styles.wordmarkAccent}>FRAME</Text>
           </Text>
           <Text style={styles.wordmarkSub}>RESPONSIVE TV EXPERIENCE</Text>
         </View>
       </View>
 
-      {/* Center Ambient Room Sensor Pill */}
-      <View style={styles.ambientPill}>
+      {/* Right: Ambient Room Sensor Status Pill */}
+      <View style={styles.ambientPill} testID="header-room-pill">
         <View
           style={[
             styles.sensorIndicatorDot,
@@ -48,29 +35,18 @@ export const Header = () => {
           ROOM SENSOR ACTIVE • {roomState.viewersPresent} VIEWERS
         </Text>
       </View>
-
-      {/* Right: Clock & Vega Badge */}
-      <View style={styles.rightSection}>
-        <Text style={styles.clockText}>{timeString}</Text>
-        <Image
-          source={require('../assets/vega.png')}
-          style={styles.vegaBadge}
-          resizeMode="contain"
-          testID="header-vega-logo"
-        />
-      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   headerContainer: {
-    height: 70,
+    height: 58,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 48,
-    paddingTop: 16,
+    paddingTop: 10,
     zIndex: 10,
   },
   brandRow: {
@@ -78,9 +54,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoBadge: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 9,
     backgroundColor: 'rgba(0, 229, 255, 0.15)',
     borderWidth: 1.5,
     borderColor: colors.primary,
@@ -89,7 +65,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   logoIcon: {
-    fontSize: 22,
+    fontSize: 20,
     color: colors.primary,
     fontWeight: 'bold',
   },
@@ -97,7 +73,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   wordmarkTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '800',
     letterSpacing: 2,
     color: colors.textPrimary,
@@ -106,7 +82,7 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   wordmarkSub: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontWeight: '600',
     letterSpacing: 1.5,
     color: colors.textSecondary,
@@ -116,9 +92,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(17, 24, 39, 0.75)',
-    paddingHorizontal: 16,
-    paddingVertical: 7,
-    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.12)',
   },
@@ -126,7 +102,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginRight: 9,
+    marginRight: 8,
   },
   sensorActive: {
     backgroundColor: colors.accentEmerald,
@@ -135,23 +111,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentGold,
   },
   ambientPillText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: '700',
     letterSpacing: 0.8,
     color: '#E2E8F0',
-  },
-  rightSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  clockText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    marginRight: 18,
-  },
-  vegaBadge: {
-    width: 90,
-    height: 36,
   },
 });
