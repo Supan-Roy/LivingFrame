@@ -1,15 +1,29 @@
+# Build and dependency artifacts
+node_modules/
+dist/
+build/
+buildinfo.json
+generated/
+*.vpkg
+CMakeUserPresets.json
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test coverage and reports
+coverage/
+reports/
+
+# Editor and OS files
+.idea/
+.vscode/
 *.iml
 *.swp
-.idea
+*.swo
 .DS_Store
-.vscode
-.tmp
-
-dist
-build
-buildinfo.json
-node_modules
-CMakeUserPresets.json
-npm-debug.log
-*.log
-generated/
+Thumbs.db
+.tmp/
+.eslintcache
