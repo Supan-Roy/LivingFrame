@@ -157,3 +157,14 @@ See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for full details on how the
 - **Milestone 2**: Vision Sensor Ingestion (Companion web/mobile stream feeding presence events).
 - **Milestone 3**: Interpretation Layer (Event aggregation + Bedrock/Gemini prompt orchestrator).
 - **Milestone 4**: Interactive TV Overlay (Seamless picture-in-picture recap HUD and gesture-driven card interactions).
+
+---
+
+## 8. License & Community
+
+- **License**: Released under the [MIT License](./LICENSE) &copy; 2026 Supan Roy.
+- **Security Policy**: See [SECURITY.md](./SECURITY.md) for vulnerability reporting.
+- **Code of Conduct**: See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
+- **Contributing**: Please read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request.
+- **Contact**: Supan Roy — [contact@supanroy.com](mailto:contact@supanroy.com)
+
