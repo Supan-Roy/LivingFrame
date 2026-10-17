@@ -328,6 +328,12 @@ class WebcamSensor:
             self.run_manual_mode()
             return
 
+        if not self.proc or not self.proc.stdout:
+            print("❌ Failed to obtain video stdout pipe.")
+            self.run_manual_mode()
+            return
+
+        stdout_pipe = self.proc.stdout
         self.uploader.start()
         fps_count = 0
         fps_start = time.time()
@@ -335,7 +341,7 @@ class WebcamSensor:
         frame_idx = 0
 
         while self.running and self.proc.poll() is None:
-            raw_data = self.proc.stdout.read(frame_size)
+            raw_data = stdout_pipe.read(frame_size)
             if len(raw_data) != frame_size:
                 break
 
@@ -536,6 +542,12 @@ class WebcamSensor:
             self.run_manual_mode()
             return
 
+        if not self.proc or not self.proc.stdout:
+            print("❌ Failed to obtain video capture stdout pipe.")
+            self.run_manual_mode()
+            return
+
+        stdout_pipe = self.proc.stdout
         self.uploader.start()
 
         fps_count = 0
@@ -544,7 +556,7 @@ class WebcamSensor:
         frame_idx = 0
 
         while self.running and self.proc.poll() is None:
-            raw_data = self.proc.stdout.read(frame_size)
+            raw_data = stdout_pipe.read(frame_size)
             if len(raw_data) != frame_size:
                 break
 
