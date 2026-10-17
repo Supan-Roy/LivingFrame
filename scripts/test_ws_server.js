@@ -57,11 +57,41 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Trigger test event via HTTP request
-  if (url.startsWith('/trigger')) {
-    const customMessage = new URL(req.url, `http://${req.headers.host}`).searchParams.get('message') || 'Triggered Test Event from Laptop';
+  // Handle gesture trigger and manual test endpoints (GET or POST)
+  if (url.startsWith('/gesture/') || url.startsWith('/trigger') || url === '/event') {
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body || '{}');
+          const payload = {
+            type: parsed.type || (url.includes('hand_raised') ? 'gesture_detected' : 'connectivity_test'),
+            gesture: parsed.gesture || (url.includes('hand_raised') ? 'hand_raised' : undefined),
+            message: parsed.message || (parsed.gesture === 'hand_raised' ? 'Hand Raised Detected' : 'Event from Laptop Sensor'),
+            timestamp: parsed.timestamp || Date.now(),
+          };
+          const count = broadcast(payload);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'event_dispatched', clientsNotified: count, event: payload }));
+        } catch (_err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
+        }
+      });
+      return;
+    }
+
+    // GET request with query params
+    const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    const isHandRaised = url.includes('/hand_raised') || parsedUrl.searchParams.get('gesture') === 'hand_raised' || parsedUrl.searchParams.get('type') === 'hand_raised';
+    const type = parsedUrl.searchParams.get('type') || (isHandRaised ? 'gesture_detected' : 'connectivity_test');
+    const gesture = parsedUrl.searchParams.get('gesture') || (isHandRaised ? 'hand_raised' : undefined);
+    const customMessage = parsedUrl.searchParams.get('message') || (isHandRaised ? 'Hand Raised Detected' : 'Triggered Event from Laptop');
+
     const payload = {
-      type: 'connectivity_test',
+      type: type,
+      gesture: gesture,
       message: customMessage,
       timestamp: Date.now(),
     };
@@ -82,16 +112,16 @@ const server = http.createServer((req, res) => {
 // Create WebSocket server attached to HTTP server
 const wss = new WebSocket.Server({ server });
 
-function broadcast(payload) {
+function broadcast(payload, excludeWs = null) {
   const messageStr = JSON.stringify(payload);
   let count = 0;
   for (const client of wss.clients) {
-    if (client.readyState === WebSocket.OPEN) {
+    if (client !== excludeWs && client.readyState === WebSocket.OPEN) {
       client.send(messageStr);
       count++;
     }
   }
-  console.log(`[SERVER BROADCAST] Dispatched '${payload.type}' to ${count} client(s): ${payload.message}`);
+  console.log(`[SERVER BROADCAST] Dispatched '${payload.type}' (gesture: ${payload.gesture || 'none'}) to ${count} client(s): ${payload.message}`);
   return count;
 }
 
@@ -114,6 +144,12 @@ wss.on('connection', (ws, req) => {
     try {
       const parsed = JSON.parse(data.toString());
       console.log(`[CLIENT MESSAGE] Received from ${remoteAddress}:`, parsed);
+
+      // Rebroadcast sensor gestures / room events to other connected clients (TV app)
+      if (parsed.type && parsed.type !== 'app_connected') {
+        if (!parsed.timestamp) parsed.timestamp = Date.now();
+        broadcast(parsed, ws);
+      }
     } catch (_err) {
       console.log(`[CLIENT MESSAGE] Received raw text from ${remoteAddress}:`, data.toString());
     }
@@ -142,5 +178,7 @@ server.listen(PORT, HOST, () => {
   console.log('--------------------------------------------------------');
   console.log('To trigger a test message manually:');
   console.log(`  curl http://localhost:${PORT}/trigger?message=CustomMessage`);
+  console.log('To trigger a hand-raised gesture event:');
+  console.log(`  curl http://localhost:${PORT}/gesture/hand_raised`);
   console.log('========================================================\n');
 });

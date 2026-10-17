@@ -7,7 +7,7 @@ import React, {
   useRef,
   ReactNode,
 } from 'react';
-import {RoomState, RoomEvent} from '../types/room';
+import {RoomState, RoomEvent, RoomGestureType} from '../types/room';
 import {
   SENSOR_SERVER_CANDIDATES,
   WS_RECONNECT_INTERVAL_MS,
@@ -18,6 +18,7 @@ interface RoomContextValue {
   triggerMockEvent: (event: Partial<RoomEvent>) => void;
   toggleSensorStatus: () => void;
   reconnectServer: () => void;
+  dismissGesture: () => void;
 }
 
 const defaultRoomState: RoomState = {
@@ -29,6 +30,8 @@ const defaultRoomState: RoomState = {
   connectedUrl: null,
   lastTestMessage: null,
   lastTestTimestamp: null,
+  activeGesture: null,
+  gestureTimestamp: null,
 };
 
 const RoomContext = createContext<RoomContextValue>({
@@ -36,12 +39,14 @@ const RoomContext = createContext<RoomContextValue>({
   triggerMockEvent: () => {},
   toggleSensorStatus: () => {},
   reconnectServer: () => {},
+  dismissGesture: () => {},
 });
 
 export const RoomProvider = ({children}: {children: ReactNode}) => {
   const [roomState, setRoomState] = useState<RoomState>(defaultRoomState);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gestureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const candidateIndexRef = useRef<number>(0);
   const isMountedRef = useRef<boolean>(true);
 
@@ -94,8 +99,58 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
         console.log(`[LivingFrame WS] Message received from ${url}:`, event.data);
         try {
           const parsed = JSON.parse(event.data);
-          if (parsed.type === 'connectivity_test') {
-            const receivedTimestamp = parsed.timestamp || Date.now();
+          const receivedTimestamp = parsed.timestamp || Date.now();
+
+          if (
+            parsed.type === 'gesture_detected' ||
+            parsed.type === 'hand_raised' ||
+            parsed.gesture === 'hand_raised' ||
+            parsed.payload?.gesture === 'hand_raised'
+          ) {
+            const gestureType: RoomGestureType =
+              parsed.gesture || parsed.payload?.gesture || 'hand_raised';
+            const message = parsed.message || 'Hand Raised Detected';
+
+            console.log(
+              `[LivingFrame WS] GESTURE DETECTED: "${gestureType}" - ${message} (Sent at: ${new Date(
+                receivedTimestamp,
+              ).toLocaleTimeString()})`,
+            );
+
+            // Clear any active gesture timer before setting new one
+            if (gestureTimerRef.current) {
+              clearTimeout(gestureTimerRef.current);
+            }
+
+            setRoomState((prev) => ({
+              ...prev,
+              sensorStatus: 'active',
+              activeGesture: gestureType,
+              gestureTimestamp: receivedTimestamp,
+              lastTestMessage: `✋ ${message}`,
+              lastTestTimestamp: receivedTimestamp,
+              lastEvent: {
+                id: `evt-${Date.now()}`,
+                type: 'gesture_detected',
+                timestamp: receivedTimestamp,
+                payload: {
+                  gesture: gestureType,
+                  message: message,
+                  viewerCount: prev.viewersPresent,
+                },
+              },
+            }));
+
+            // Auto-dismiss gesture reaction notification after 5 seconds
+            gestureTimerRef.current = setTimeout(() => {
+              if (isMountedRef.current) {
+                setRoomState((prev) => ({
+                  ...prev,
+                  activeGesture: null,
+                }));
+              }
+            }, 5000);
+          } else if (parsed.type === 'connectivity_test') {
             console.log(
               `[LivingFrame WS] CONNECTIVITY TEST SUCCESS: "${parsed.message}" (Sent at: ${new Date(
                 receivedTimestamp,
@@ -179,6 +234,9 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
       }
+      if (gestureTimerRef.current) {
+        clearTimeout(gestureTimerRef.current);
+      }
       if (wsRef.current) {
         wsRef.current.close();
       }
@@ -191,6 +249,16 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
     }
     connectToCandidate(candidateIndexRef.current);
   };
+
+  const dismissGesture = useCallback(() => {
+    if (gestureTimerRef.current) {
+      clearTimeout(gestureTimerRef.current);
+    }
+    setRoomState((prev) => ({
+      ...prev,
+      activeGesture: null,
+    }));
+  }, []);
 
   const triggerMockEvent = (event: Partial<RoomEvent>) => {
     const fullEvent: RoomEvent = {
@@ -215,7 +283,7 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
 
   return (
     <RoomContext.Provider
-      value={{roomState, triggerMockEvent, toggleSensorStatus, reconnectServer}}>
+      value={{roomState, triggerMockEvent, toggleSensorStatus, reconnectServer, dismissGesture}}>
       {children}
     </RoomContext.Provider>
   );

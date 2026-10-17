@@ -45,4 +45,6 @@ export interface RoomState {
   connectedUrl?: string | null;
   lastTestMessage?: string | null;
   lastTestTimestamp?: number | null;
+  activeGesture?: RoomGestureType | null;
+  gestureTimestamp?: number | null;
 }

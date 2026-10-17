@@ -27,3 +27,7 @@ reports/
 Thumbs.db
 .tmp/
 .eslintcache
+
+# Python cache
+__pycache__/
+*.py[cod]
