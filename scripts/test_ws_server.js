@@ -45,6 +45,9 @@ let latestFrameBuffer = null;
 let latestSensorTelemetry = {
   activeGesture: null,
   gestureMessage: null,
+  confidence: 0,
+  handedness: null,
+  engine: 'mediapipe',
   skinCount: 0,
   baseline: 0,
   delta: 0,
@@ -64,6 +67,7 @@ const server = http.createServer((req, res) => {
       service: 'LivingFrame-Laptop-Test-Server',
       connectedClients: wss.clients.size,
       hasCameraFeed: latestFrameBuffer !== null,
+      telemetry: latestSensorTelemetry,
       timestamp: Date.now(),
     }));
     return;
@@ -79,6 +83,9 @@ const server = http.createServer((req, res) => {
         latestSensorTelemetry = {
           activeGesture: req.headers['x-gesture'] || null,
           gestureMessage: req.headers['x-message'] || null,
+          confidence: parseFloat(req.headers['x-confidence']) || 0,
+          handedness: req.headers['x-handedness'] || null,
+          engine: req.headers['x-engine'] || 'mediapipe',
           skinCount: parseInt(req.headers['x-skin-count'], 10) || 0,
           baseline: parseInt(req.headers['x-baseline'], 10) || 0,
           delta: parseInt(req.headers['x-delta'], 10) || 0,
@@ -280,12 +287,12 @@ const server = http.createServer((req, res) => {
       <div class="badge">❖</div>
       <div>
         <h1>LIVING<span>FRAME</span></h1>
-        <div class="subtitle">LAPTOP ROOM SENSOR — LIVE WEBCAM FEED</div>
+        <div class="subtitle">ROOM SENSOR — MEDIAPIPE GESTURE RECOGNIZER</div>
       </div>
     </div>
     <div class="live-tag">
       <div class="dot"></div>
-      CAMERA ACTIVE
+      <span id="engine-tag">ML INFERENCE ACTIVE</span>
     </div>
   </div>
 
@@ -293,50 +300,55 @@ const server = http.createServer((req, res) => {
     <div class="video-viewport">
       <img id="camera-feed" src="/camera/frame" alt="Webcam Feed Loading..." onerror="this.style.opacity='0.5'" onload="this.style.opacity='1'" />
       <div class="detection-zone">
-        <span class="zone-label">✋ GESTURE ZONE (UPPER 35%)</span>
+        <span id="zone-label" class="zone-label">🤖 MEDIAPIPE ML ACTIVE (FULL FRAME HAND TRACKING)</span>
       </div>
       <div id="alert-banner" class="alert-banner">
-        ✋ HAND-RAISE DETECTED • SENT TO VEGA TV
+        ✋ GESTURE DETECTED • SENT TO VEGA TV
       </div>
     </div>
 
     <div class="metrics-bar">
       <div class="metric">
+        <span class="metric-label">INFERENCE ENGINE</span>
+        <span id="metric-engine" class="metric-val green">MediaPipe ML</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">DETECTED GESTURE</span>
+        <span id="metric-gesture" class="metric-val cyan">None</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">ML CONFIDENCE</span>
+        <span id="metric-conf" class="metric-val gold">-- %</span>
+      </div>
+      <div class="metric">
         <span class="metric-label">CAMERA FPS</span>
-        <span id="metric-fps" class="metric-val cyan">-- fps</span>
-      </div>
-      <div class="metric">
-        <span class="metric-label">UPPER SKIN PIXELS</span>
-        <span id="metric-skin" class="metric-val gold">-- px</span>
-      </div>
-      <div class="metric">
-        <span class="metric-label">DELTA OVER BASELINE</span>
-        <span id="metric-delta" class="metric-val">-- px</span>
-      </div>
-      <div class="metric">
-        <span class="metric-label">TV APP STATUS</span>
-        <span id="metric-tv" class="metric-val green">CONNECTED</span>
+        <span id="metric-fps" class="metric-val">-- fps</span>
       </div>
     </div>
   </div>
 
   <div class="footer">
     <span>Privacy Mode: 100% Local Inference (Zero cloud streaming)</span>
-    <button class="btn-manual" onclick="fetch('/gesture/hand_raised').then(r=>r.json()).then(d=>console.log(d))">⚡ Test Hand Raise Event</button>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn-manual" onclick="fetch('/gesture/open_palm').then(r=>r.json()).then(d=>console.log(d))">✋ Open Palm</button>
+      <button class="btn-manual" onclick="fetch('/gesture/thumbs_up').then(r=>r.json()).then(d=>console.log(d))">👍 Thumbs Up</button>
+      <button class="btn-manual" onclick="fetch('/gesture/closed_fist').then(r=>r.json()).then(d=>console.log(d))">✊ Closed Fist</button>
+    </div>
   </div>
 
   <script>
     const feed = document.getElementById('camera-feed');
     const alertBanner = document.getElementById('alert-banner');
+    const metricEngine = document.getElementById('metric-engine');
+    const metricGesture = document.getElementById('metric-gesture');
+    const metricConf = document.getElementById('metric-conf');
     const metricFps = document.getElementById('metric-fps');
-    const metricSkin = document.getElementById('metric-skin');
-    const metricDelta = document.getElementById('metric-delta');
     let alertTimer = null;
 
     // Refresh image feed smoothly
     setInterval(() => {
       feed.src = '/camera/frame?t=' + Date.now();
-    }, 120);
+    }, 100);
 
     // Poll telemetry metrics
     setInterval(async () => {
@@ -344,17 +356,26 @@ const server = http.createServer((req, res) => {
         const res = await fetch('/camera/telemetry');
         if (!res.ok) return;
         const data = await res.json();
+        metricEngine.innerText = (data.engine === 'mediapipe' ? 'MediaPipe ML' : 'Heuristic');
         metricFps.innerText = (data.fps || 10).toFixed(1) + ' fps';
-        metricSkin.innerText = (data.skinCount || 0) + ' px';
-        metricDelta.innerText = (data.delta >= 0 ? '+' : '') + (data.delta || 0) + ' px';
         
-        if (data.activeGesture === 'hand_raised') {
+        if (data.activeGesture && data.activeGesture !== 'None') {
+          const emojiMap = { open_palm: '✋', hand_raised: '✋', thumbs_up: '👍', closed_fist: '✊', point_to_screen: '👆', victory: '✌️' };
+          const emoji = emojiMap[data.activeGesture] || '✋';
+          const label = data.activeGesture.replace(/_/g, ' ').toUpperCase();
+          metricGesture.innerText = emoji + ' ' + label;
+          metricConf.innerText = data.confidence ? (data.confidence * 100).toFixed(1) + '%' : '--';
+          
+          alertBanner.innerText = emoji + ' ' + label + ' DETECTED • SENT TO VEGA TV';
           alertBanner.style.display = 'block';
           if (alertTimer) clearTimeout(alertTimer);
-          alertTimer = setTimeout(() => { alertBanner.style.display = 'none'; }, 3000);
+          alertTimer = setTimeout(() => { alertBanner.style.display = 'none'; }, 2500);
+        } else {
+          metricGesture.innerText = 'None';
+          metricConf.innerText = '--';
         }
       } catch (err) {}
-    }, 300);
+    }, 250);
   </script>
 </body>
 </html>`);
@@ -369,10 +390,16 @@ const server = http.createServer((req, res) => {
       req.on('end', () => {
         try {
           const parsed = JSON.parse(body || '{}');
+          const gestureMatch = url.match(/\/gesture\/([a-zA-Z0-9_]+)/);
+          const pathGesture = gestureMatch ? gestureMatch[1] : undefined;
+          const gesture = parsed.gesture || pathGesture || (url.includes('hand_raised') ? 'hand_raised' : undefined);
           const payload = {
-            type: parsed.type || (url.includes('hand_raised') ? 'gesture_detected' : 'connectivity_test'),
-            gesture: parsed.gesture || (url.includes('hand_raised') ? 'hand_raised' : undefined),
-            message: parsed.message || (parsed.gesture === 'hand_raised' ? 'Hand Raised Detected' : 'Event from Laptop Sensor'),
+            type: parsed.type || (gesture ? 'gesture_detected' : 'connectivity_test'),
+            gesture: gesture,
+            confidence: parsed.confidence,
+            handedness: parsed.handedness,
+            engine: parsed.engine || 'mediapipe',
+            message: parsed.message || (gesture ? `${gesture.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} Detected` : 'Event from Laptop Sensor'),
             timestamp: parsed.timestamp || Date.now(),
           };
           const count = broadcast(payload);
@@ -388,14 +415,17 @@ const server = http.createServer((req, res) => {
 
     // GET request with query params
     const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    const isHandRaised = url.includes('/hand_raised') || parsedUrl.searchParams.get('gesture') === 'hand_raised' || parsedUrl.searchParams.get('type') === 'hand_raised';
-    const type = parsedUrl.searchParams.get('type') || (isHandRaised ? 'gesture_detected' : 'connectivity_test');
-    const gesture = parsedUrl.searchParams.get('gesture') || (isHandRaised ? 'hand_raised' : undefined);
-    const customMessage = parsedUrl.searchParams.get('message') || (isHandRaised ? 'Hand Raised Detected' : 'Triggered Event from Laptop');
+    const gestureMatch = url.match(/\/gesture\/([a-zA-Z0-9_]+)/);
+    const pathGesture = gestureMatch ? gestureMatch[1] : undefined;
+    const gesture = parsedUrl.searchParams.get('gesture') || pathGesture || (url.includes('hand_raised') ? 'hand_raised' : undefined);
+    const type = parsedUrl.searchParams.get('type') || (gesture ? 'gesture_detected' : 'connectivity_test');
+    const customMessage = parsedUrl.searchParams.get('message') || (gesture ? `${gesture.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} Detected` : 'Triggered Event from Laptop');
 
     const payload = {
       type: type,
       gesture: gesture,
+      confidence: parseFloat(parsedUrl.searchParams.get('confidence')) || 0.95,
+      engine: parsedUrl.searchParams.get('engine') || 'mediapipe',
       message: customMessage,
       timestamp: Date.now(),
     };

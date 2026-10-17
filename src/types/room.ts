@@ -15,8 +15,11 @@ export type ViewerPresence = {
 export type RoomGestureType =
   | 'wave'
   | 'hand_raised'
+  | 'open_palm'
+  | 'closed_fist'
   | 'thumbs_up'
   | 'point_to_screen'
+  | 'victory'
   | 'none';
 
 export interface RoomEvent {

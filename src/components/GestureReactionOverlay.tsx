@@ -28,25 +28,67 @@ export const GestureReactionOverlay = ({onOpenRecap}: GestureReactionOverlayProp
     }
   };
 
+  const getGestureMeta = () => {
+    switch (roomState.activeGesture) {
+      case 'open_palm':
+      case 'hand_raised':
+        return {
+          icon: '✋',
+          title: 'OPEN-PALM DETECTED',
+          subtitle: 'Room vision detected viewer engagement • Quick recap available',
+        };
+      case 'thumbs_up':
+        return {
+          icon: '👍',
+          title: 'THUMBS-UP DETECTED',
+          subtitle: 'Viewer liked current spotlight • Reaction registered',
+        };
+      case 'closed_fist':
+        return {
+          icon: '✊',
+          title: 'CLOSED-FIST DETECTED',
+          subtitle: 'Room vision detected focus hold • Spotlight locked',
+        };
+      case 'point_to_screen':
+        return {
+          icon: '👆',
+          title: 'POINTING DETECTED',
+          subtitle: 'Viewer pointing to screen • Detail inspected',
+        };
+      case 'victory':
+        return {
+          icon: '✌️',
+          title: 'VICTORY DETECTED',
+          subtitle: 'Viewer celebration detected • Highlights available',
+        };
+      default:
+        return {
+          icon: '✋',
+          title: 'GESTURE DETECTED',
+          subtitle: 'Room vision detected viewer interaction',
+        };
+    }
+  };
+
+  const gestureMeta = getGestureMeta();
+
   return (
     <View style={styles.overlayContainer} pointerEvents="box-none" testID="gesture-reaction-overlay">
       <View style={styles.reactionCard}>
         {/* Glow Header Row */}
         <View style={styles.cardHeader}>
           <View style={styles.gestureIconBadge}>
-            <Text style={styles.gestureIcon}>✋</Text>
+            <Text style={styles.gestureIcon}>{gestureMeta.icon}</Text>
           </View>
           <View style={styles.headerTextCol}>
             <View style={styles.titleRow}>
-              <Text style={styles.titleText}>HAND-RAISE DETECTED</Text>
+              <Text style={styles.titleText}>{gestureMeta.title}</Text>
               <View style={styles.liveIndicator}>
                 <View style={styles.pulseDot} />
                 <Text style={styles.liveText}>LIVE SENSOR</Text>
               </View>
             </View>
-            <Text style={styles.subtitleText}>
-              Room vision detected viewer engagement • Quick recap available
-            </Text>
+            <Text style={styles.subtitleText}>{gestureMeta.subtitle}</Text>
           </View>
         </View>
 
