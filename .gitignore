@@ -31,3 +31,12 @@ Thumbs.db
 # Python cache
 __pycache__/
 *.py[cod]
+
+# Camera captures, test media, and recordings
+*.jpg
+*.jpeg
+*.mp4
+*.webm
+*.raw
+captures/
+screenshots/
