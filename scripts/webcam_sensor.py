@@ -21,14 +21,22 @@ Usage:
 
 import sys
 import os
+import importlib
 
-# Auto-detect project virtual environment if not already running inside it
+# Ensure project .venv site-packages is in sys.path for both IDE language servers and runtime
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VENV_PYTHON = os.path.join(PROJECT_ROOT, '.venv', 'bin', 'python')
 
+_venv_lib = os.path.join(PROJECT_ROOT, '.venv', 'lib')
+if os.path.isdir(_venv_lib):
+    for _entry in os.listdir(_venv_lib):
+        _sp = os.path.join(_venv_lib, _entry, 'site-packages')
+        if os.path.isdir(_sp) and _sp not in sys.path:
+            sys.path.insert(0, _sp)
+
 if os.path.exists(VENV_PYTHON) and sys.executable != VENV_PYTHON:
     try:
-        import mediapipe
+        importlib.import_module('mediapipe')
     except ImportError:
         # Re-exec under project virtualenv
         os.execv(VENV_PYTHON, [VENV_PYTHON] + sys.argv)
@@ -415,11 +423,11 @@ class WebcamSensor:
 
         # Step 2: Attempt MediaPipe and OpenCV import
         try:
-            import cv2
-            import numpy as np
-            import mediapipe as mp
-            from mediapipe.tasks import python as mp_python
-            from mediapipe.tasks.python import vision as mp_vision
+            cv2 = importlib.import_module('cv2')
+            np = importlib.import_module('numpy')
+            mp = importlib.import_module('mediapipe')
+            mp_python = importlib.import_module('mediapipe.tasks.python')
+            mp_vision = importlib.import_module('mediapipe.tasks.python.vision')
         except ImportError as e:
             print(f"❌ [ML INITIALIZATION FAILED] MediaPipe dependency missing: {e}")
             print(f"Running interpreter: {sys.executable}")
