@@ -28,9 +28,12 @@ Thumbs.db
 .tmp/
 .eslintcache
 
-# Python cache
+# Python cache and environments
 __pycache__/
 *.py[cod]
+.venv/
+venv/
+models/*.task
 
 # Camera captures, test media, and recordings
 *.jpg
