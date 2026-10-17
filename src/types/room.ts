@@ -1,6 +1,6 @@
 /**
  * Room Awareness & Intelligence Interfaces
- * Future architecture extension points for LivingFrame's room sensing layer
+ * Extension points for LivingFrame's room sensing and connectivity layer
  */
 
 export type SensorStatus = 'disconnected' | 'connecting' | 'active' | 'standby';
@@ -21,7 +21,12 @@ export type RoomGestureType =
 
 export interface RoomEvent {
   id: string;
-  type: 'viewer_entered' | 'viewer_left' | 'gesture_detected' | 'recap_requested';
+  type:
+    | 'viewer_entered'
+    | 'viewer_left'
+    | 'gesture_detected'
+    | 'recap_requested'
+    | 'connectivity_test';
   timestamp: number;
   payload: {
     viewerCount?: number;
@@ -37,4 +42,7 @@ export interface RoomState {
   lastEvent?: RoomEvent;
   isRecapAvailable: boolean;
   ambientMode: 'standard' | 'focused' | 'party' | 'night';
+  connectedUrl?: string | null;
+  lastTestMessage?: string | null;
+  lastTestTimestamp?: number | null;
 }

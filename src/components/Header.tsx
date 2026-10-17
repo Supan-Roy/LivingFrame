@@ -6,6 +6,16 @@ import {useRoom} from '../context/RoomContext';
 export const Header = () => {
   const {roomState} = useRoom();
 
+  const getStatusText = () => {
+    if (roomState.sensorStatus === 'active') {
+      return `ROOM SENSOR ACTIVE • ${roomState.viewersPresent} VIEWERS`;
+    }
+    if (roomState.sensorStatus === 'connecting') {
+      return 'CONNECTING TO SENSOR HUB...';
+    }
+    return 'SENSOR OFFLINE (RETRYING)';
+  };
+
   return (
     <View style={styles.headerContainer}>
       {/* Brand & Wordmark */}
@@ -21,19 +31,30 @@ export const Header = () => {
         </View>
       </View>
 
-      {/* Right: Ambient Room Sensor Status Pill */}
-      <View style={styles.ambientPill} testID="header-room-pill">
-        <View
-          style={[
-            styles.sensorIndicatorDot,
-            roomState.sensorStatus === 'active'
-              ? styles.sensorActive
-              : styles.sensorStandby,
-          ]}
-        />
-        <Text style={styles.ambientPillText}>
-          ROOM SENSOR ACTIVE • {roomState.viewersPresent} VIEWERS
-        </Text>
+      {/* Right: Diagnostic Test Badge & Ambient Room Sensor Pill */}
+      <View style={styles.rightContainer}>
+        {roomState.lastTestMessage && (
+          <View style={styles.testBadge} testID="header-test-badge">
+            <Text style={styles.testBadgeIcon}>📡</Text>
+            <Text style={styles.testBadgeText} numberOfLines={1}>
+              {roomState.lastTestMessage}
+            </Text>
+          </View>
+        )}
+
+        <View style={styles.ambientPill} testID="header-room-pill">
+          <View
+            style={[
+              styles.sensorIndicatorDot,
+              roomState.sensorStatus === 'active'
+                ? styles.sensorActive
+                : roomState.sensorStatus === 'connecting'
+                ? styles.sensorStandby
+                : styles.sensorDisconnected,
+            ]}
+          />
+          <Text style={styles.ambientPillText}>{getStatusText()}</Text>
+        </View>
       </View>
     </View>
   );
@@ -88,6 +109,31 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: -2,
   },
+  rightContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  testBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 229, 255, 0.15)',
+    borderWidth: 1,
+    borderColor: colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 16,
+    marginRight: 12,
+  },
+  testBadgeIcon: {
+    fontSize: 12,
+    marginRight: 6,
+  },
+  testBadgeText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: colors.primary,
+    maxWidth: 220,
+  },
   ambientPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -109,6 +155,9 @@ const styles = StyleSheet.create({
   },
   sensorStandby: {
     backgroundColor: colors.accentGold,
+  },
+  sensorDisconnected: {
+    backgroundColor: '#64748B',
   },
   ambientPillText: {
     fontSize: 10.5,
