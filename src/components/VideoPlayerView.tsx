@@ -262,13 +262,13 @@ export const VideoPlayerView = ({
               <View
                 style={[
                   styles.ambientDot,
-                  roomState.presenceDetected && styles.ambientDotActive,
+                  roomState.sensorStatus === 'active' && styles.ambientDotActive,
                 ]}
               />
               <Text style={styles.ambientPillText}>
                 {roomState.activeGesture
                   ? `ROOM: ${roomState.activeGesture.toUpperCase()}`
-                  : roomState.presenceDetected
+                  : roomState.sensorStatus === 'active'
                   ? 'ROOM SENSOR ACTIVE'
                   : 'AMBIENT SYNC ON'}
               </Text>
@@ -421,7 +421,7 @@ const styles = StyleSheet.create({
   },
   hudButtonFocused: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderColor: colors.accentYellow,
+    borderColor: colors.accentGold,
     transform: [{scale: 1.05}],
   },
   hudButtonIcon: {
@@ -594,7 +594,7 @@ const styles = StyleSheet.create({
   },
   controlBtnFocused: {
     backgroundColor: '#FFFFFF',
-    borderColor: colors.accentYellow,
+    borderColor: colors.accentGold,
     transform: [{scale: 1.06}],
   },
   controlBtnText: {
