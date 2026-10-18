@@ -10,6 +10,26 @@ jest.mock('@amazon-devices/react-native-w3cmedia', () => {
   const ReactModule = require('react');
   const {View} = require('react-native');
   return {
+    VideoPlayer: class MockVideoPlayer {
+      initialize = jest.fn().mockResolvedValue(undefined);
+      deinitialize = jest.fn().mockResolvedValue(undefined);
+      setSurfaceHandle = jest.fn();
+      clearSurfaceHandle = jest.fn();
+      play = jest.fn().mockResolvedValue(undefined);
+      pause = jest.fn();
+      load = jest.fn();
+      addEventListener = jest.fn();
+      removeEventListener = jest.fn();
+      currentTime = 0;
+      duration = 10;
+      src = '';
+      autoplay = false;
+    },
+    KeplerVideoSurfaceView: (props: any) =>
+      ReactModule.createElement(View, {
+        ...props,
+        testID: props.testID || 'mock-kepler-video-surface-view',
+      }),
     Video: ReactModule.forwardRef((props: any, ref: any) => {
       ReactModule.useImperativeHandle(ref, () => ({
         play: jest.fn(),

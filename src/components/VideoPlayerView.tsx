@@ -4,21 +4,21 @@ import {
   Text,
   View,
   Pressable,
-  Dimensions,
-  Animated,
-  Easing,
+  ActivityIndicator,
 } from 'react-native';
 import {
   TVFocusGuideView,
   useTVEventHandler,
   HWEvent,
 } from '@amazon-devices/react-native-kepler';
-import {Video} from '@amazon-devices/react-native-w3cmedia';
+import {
+  VideoPlayer,
+  KeplerVideoSurfaceView,
+} from '@amazon-devices/react-native-w3cmedia';
 import {MediaItem} from '../types/catalog';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
 import {GestureReactionOverlay} from './GestureReactionOverlay';
-import {getStreamScene} from '../data/videoStreamData';
 
 export interface VideoPlayerViewProps {
   item: MediaItem | null;
@@ -36,128 +36,178 @@ export const VideoPlayerView = ({
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [currentTimeSec, setCurrentTimeSec] = useState<number>(0);
   const [durationSec, setDurationSec] = useState<number>(
-    item?.durationSec && item.durationSec > 0 ? item.durationSec : 120,
+    item?.durationSec && item.durationSec > 0 ? Math.min(item.durationSec, 30) : 10,
   );
+  const [isVideoLoading, setIsVideoLoading] = useState<boolean>(true);
   const [focusedControl, setFocusedControl] = useState<
     'back' | 'play' | 'restart' | 'recap'
   >('play');
 
-  const {width: windowWidth = 1920, height: windowHeight = 1080} =
-    Dimensions.get('window') || {};
-  const videoRef = useRef<Video>(null);
+  const videoPlayerRef = useRef<VideoPlayer | null>(null);
+  const surfaceHandleRef = useRef<string | null>(null);
+  const isPlayingRef = useRef<boolean>(true);
   const {roomState} = useRoom();
-  const driftAnim = useRef(new Animated.Value(0)).current;
 
-  // Cinematic Ken Burns camera drift effect during active playback
+  // W3C VideoPlayer lifecycle management
   useEffect(() => {
-    if (!visible || !isPlaying) {
-      driftAnim.stopAnimation();
+    if (!visible || !item?.videoUrl) {
       return;
     }
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(driftAnim, {
-          toValue: 1,
-          duration: 7000,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(driftAnim, {
-          toValue: 0,
-          duration: 7000,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    animation.start();
-    return () => animation.stop();
-  }, [visible, isPlaying, driftAnim]);
 
-  // Reset progress and imperatively initialize videoRef when item changes
-  useEffect(() => {
-    if (visible && item) {
-      setIsPlaying(true);
-      setCurrentTimeSec(0);
-      setDurationSec(item.durationSec > 0 ? item.durationSec : 120);
-      setFocusedControl('play');
-      if (videoRef.current && item.videoUrl) {
-        try {
-          videoRef.current.src = item.videoUrl;
-          videoRef.current.play();
-        } catch (e) {
-          console.warn('[LivingFrame Video] videoRef initialization notice:', e);
+    let isMounted = true;
+    setIsVideoLoading(true);
+    setCurrentTimeSec(0);
+    setIsPlaying(true);
+    isPlayingRef.current = true;
+
+    const player = new VideoPlayer();
+    videoPlayerRef.current = player;
+
+    player
+      .initialize()
+      .then(() => {
+        if (!isMounted) {
+          return;
         }
+        console.log('[LivingFrame Video] VideoPlayer initialized for:', item.videoUrl);
+
+        player.addEventListener('loadedmetadata', () => {
+          if (!isMounted) return;
+          console.log('[LivingFrame Video] loadedmetadata duration:', player.duration);
+          if (player.duration && !isNaN(player.duration) && player.duration > 0) {
+            setDurationSec(Math.round(player.duration));
+          }
+          setIsVideoLoading(false);
+        });
+
+        player.addEventListener('timeupdate', () => {
+          if (!isMounted) return;
+          if (player.currentTime != null && !isNaN(player.currentTime)) {
+            setCurrentTimeSec(Math.floor(player.currentTime));
+          }
+        });
+
+        player.addEventListener('playing', () => {
+          if (!isMounted) return;
+          setIsPlaying(true);
+          isPlayingRef.current = true;
+          setIsVideoLoading(false);
+        });
+
+        player.addEventListener('pause', () => {
+          if (!isMounted) return;
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+        });
+
+        player.addEventListener('ended', () => {
+          if (!isMounted) return;
+          console.log('[LivingFrame Video] video playback ended, restarting loop');
+          try {
+            player.currentTime = 0;
+            player.play();
+          } catch (e) {
+            console.warn('[LivingFrame Video] loop restart notice:', e);
+          }
+        });
+
+        player.addEventListener('error', (event: any) => {
+          const errMsg =
+            event?.target?.mediaControlStateUtil?.mError?.message_ ||
+            'Video playback event';
+          console.warn('[LivingFrame Video] player error notice:', errMsg);
+          setIsVideoLoading(false);
+        });
+
+        // Set media URL and load stream
+        player.src = item.videoUrl || '';
+        player.autoplay = false;
+        player.load();
+
+        // If surface handle was already created, bind it and start playback
+        if (surfaceHandleRef.current) {
+          player.setSurfaceHandle(surfaceHandleRef.current);
+          player.play().catch((err) => {
+            console.warn('[LivingFrame Video] auto play rejected:', err);
+          });
+        }
+      })
+      .catch((err) => {
+        console.error('[LivingFrame Video] VideoPlayer.initialize error:', err);
+        setIsVideoLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+      if (videoPlayerRef.current) {
+        if (surfaceHandleRef.current) {
+          try {
+            videoPlayerRef.current.clearSurfaceHandle(surfaceHandleRef.current);
+          } catch (e) {
+            // ignore
+          }
+        }
+        try {
+          videoPlayerRef.current.pause();
+          videoPlayerRef.current.deinitialize();
+        } catch (e) {
+          // ignore
+        }
+        videoPlayerRef.current = null;
+      }
+      surfaceHandleRef.current = null;
+    };
+  }, [visible, item?.videoUrl]);
+
+  // Surface view callbacks from KeplerVideoSurfaceView
+  const onSurfaceViewCreated = useCallback((handle: string) => {
+    console.log('[LivingFrame Video] onSurfaceViewCreated handle:', handle);
+    surfaceHandleRef.current = handle;
+    if (videoPlayerRef.current) {
+      videoPlayerRef.current.setSurfaceHandle(handle);
+      if (isPlayingRef.current) {
+        videoPlayerRef.current.play().catch((err) => {
+          console.warn('[LivingFrame Video] play on surface created notice:', err);
+        });
       }
     }
-  }, [visible, item]);
+  }, []);
 
-  // Active playback ticker: advances currentTimeSec every second while playing
-  useEffect(() => {
-    if (!visible || !isPlaying || !item) {
-      return;
-    }
-    const interval = setInterval(() => {
-      setCurrentTimeSec((prev) => {
-        const duration = item.durationSec > 0 ? item.durationSec : 120;
-        if (prev >= duration) {
-          return 0; // loop playback
-        }
-        return prev + 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [visible, isPlaying, item]);
-
-  // Remote key handling for media playback
-  useTVEventHandler((evt: HWEvent) => {
-    if (!visible || !evt || !evt.eventType) {
-      return;
-    }
-    const eventType = evt.eventType.toLowerCase();
-    if (eventType === 'play' || eventType === 'media_play') {
-      handlePlay();
-    } else if (eventType === 'pause' || eventType === 'media_pause') {
-      handlePause();
-    } else if (
-      eventType === 'play_pause' ||
-      eventType === 'media_play_pause' ||
-      eventType === 'space'
-    ) {
-      handleTogglePlay();
-    } else if (eventType === 'rewind' || eventType === 'media_rewind') {
-      handleRestart();
-    }
-  });
-
-  const handlePlay = useCallback(() => {
-    if (videoRef.current) {
+  const onSurfaceViewDestroyed = useCallback((handle: string) => {
+    console.log('[LivingFrame Video] onSurfaceViewDestroyed handle:', handle);
+    if (videoPlayerRef.current) {
       try {
-        if (
-          videoRef.current.currentTime != null &&
-          videoRef.current.duration != null &&
-          videoRef.current.currentTime >= videoRef.current.duration
-        ) {
-          videoRef.current.currentTime = 0;
-          setCurrentTimeSec(0);
-        }
-        videoRef.current.play();
+        videoPlayerRef.current.clearSurfaceHandle(handle);
       } catch (e) {
-        console.warn('[LivingFrame Video] video.play() notice:', e);
+        // ignore
+      }
+    }
+    surfaceHandleRef.current = null;
+  }, []);
+
+  // Playback control functions
+  const handlePlay = useCallback(() => {
+    if (videoPlayerRef.current) {
+      try {
+        videoPlayerRef.current.play();
+      } catch (e) {
+        console.warn('[LivingFrame Video] play notice:', e);
       }
     }
     setIsPlaying(true);
+    isPlayingRef.current = true;
   }, []);
 
   const handlePause = useCallback(() => {
-    if (videoRef.current && typeof videoRef.current.pause === 'function') {
+    if (videoPlayerRef.current) {
       try {
-        videoRef.current.pause();
+        videoPlayerRef.current.pause();
       } catch (e) {
-        console.warn('[LivingFrame Video] video.pause() notice:', e);
+        console.warn('[LivingFrame Video] pause notice:', e);
       }
     }
     setIsPlaying(false);
+    isPlayingRef.current = false;
   }, []);
 
   const handleTogglePlay = useCallback(() => {
@@ -169,16 +219,45 @@ export const VideoPlayerView = ({
   }, [isPlaying, handlePause, handlePlay]);
 
   const handleRestart = useCallback(() => {
-    if (videoRef.current) {
+    if (videoPlayerRef.current) {
       try {
-        videoRef.current.currentTime = 0;
+        videoPlayerRef.current.currentTime = 0;
+        videoPlayerRef.current.play();
       } catch (e) {
-        console.warn('[LivingFrame Video] resetting currentTime notice:', e);
+        console.warn('[LivingFrame Video] restart notice:', e);
       }
     }
     setCurrentTimeSec(0);
-    handlePlay();
-  }, [handlePlay]);
+    setIsPlaying(true);
+    isPlayingRef.current = true;
+  }, []);
+
+  // Hardware remote key event listener
+  useTVEventHandler((evt: HWEvent) => {
+    if (!visible || !evt || !evt.eventType) {
+      return;
+    }
+    const eventType = evt.eventType.toLowerCase();
+    if (eventType === 'play' || eventType === 'media_play') {
+      handlePlay();
+    } else if (eventType === 'pause' || eventType === 'media_pause') {
+      handlePause();
+    } else if (eventType === 'rewind' || eventType === 'media_rewind') {
+      if (videoPlayerRef.current) {
+        videoPlayerRef.current.currentTime = Math.max(
+          0,
+          (videoPlayerRef.current.currentTime || 0) - 10,
+        );
+      }
+    } else if (eventType === 'fastforward' || eventType === 'media_fast_forward') {
+      if (videoPlayerRef.current) {
+        videoPlayerRef.current.currentTime = Math.min(
+          durationSec,
+          (videoPlayerRef.current.currentTime || 0) + 10,
+        );
+      }
+    }
+  });
 
   if (!item || visible === false) {
     return null;
@@ -195,65 +274,28 @@ export const VideoPlayerView = ({
       ? Math.min(100, Math.max(0, (currentTimeSec / durationSec) * 100))
       : 0;
 
-  const playerWidth = windowWidth > 0 ? windowWidth : 1920;
-  const playerHeight = windowHeight > 0 ? windowHeight : 1080;
-
-  const currentScene = getStreamScene(item.id, currentTimeSec, item.posterUrl);
-
-  const scale = driftAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1.0, 1.05],
-  });
-
-  const translateX = driftAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, -12],
-  });
-
   return (
     <View style={styles.playerContainer} testID="livingframe-videoplayer-view">
-      {/* 1. Underlying Native Video Player Instance (for Vega OS media pipeline) */}
-      {item.videoUrl ? (
-        <View style={styles.nativeVideoBackground} pointerEvents="none">
-          <Video
-            ref={videoRef}
-            testID="native-video-surface"
-            src={item.videoUrl}
-            autoplay={isPlaying}
-            loop={true}
-            controls={false}
-            showCaptions={false}
-            scalingmode="fit"
-            width={playerWidth}
-            height={playerHeight}
-            style={styles.nativeVideo}
-            onTimeUpdate={() => {
-              if (
-                videoRef.current?.currentTime != null &&
-                videoRef.current.currentTime > 0
-              ) {
-                setCurrentTimeSec(Math.floor(videoRef.current.currentTime));
-              }
-            }}
-          />
-        </View>
-      ) : null}
-
-      {/* 2. Dynamic 1080p Cinema Video Stream (switching camera shots with Ken Burns motion) */}
-      {currentScene.image ? (
-        <Animated.Image
-          source={currentScene.image}
-          style={[
-            styles.cinemaBackdrop,
-            {
-              transform: [{scale}, {translateX}],
-            },
-          ]}
-          resizeMode="cover"
+      {/* 1. Hardware Accelerated Native Video Surface rendered by Vega Media Engine */}
+      <View style={styles.surfaceWrapper}>
+        <KeplerVideoSurfaceView
+          style={styles.surfaceView}
+          scalingmode="fit"
+          onSurfaceViewCreated={onSurfaceViewCreated}
+          onSurfaceViewDestroyed={onSurfaceViewDestroyed}
+          testID="kepler-video-surface-view"
         />
-      ) : null}
+      </View>
 
-      {/* 3. Cinema Edge Overlays (top and bottom gradient vignettes) */}
+      {/* 2. Buffering / Loading Indicator */}
+      {isVideoLoading && (
+        <View style={styles.loadingOverlay} pointerEvents="none">
+          <ActivityIndicator size="large" color={colors.accentGold} />
+          <Text style={styles.loadingText}>Connecting Video Stream...</Text>
+        </View>
+      )}
+
+      {/* 3. Subtle Edge Vignettes for Navigation Legibility */}
       <View style={styles.topVignette} pointerEvents="none" />
       <View style={styles.bottomVignette} pointerEvents="none" />
 
@@ -329,7 +371,7 @@ export const VideoPlayerView = ({
 
       {/* 6. Center Pause Watermark Indicator */}
       {!isPlaying && (
-        <View style={styles.pausedIndicator}>
+        <View style={styles.pausedIndicator} pointerEvents="none">
           <View style={styles.pausedBadge}>
             <Text style={styles.pausedIcon}>⏸</Text>
             <Text style={styles.pausedText}>PAUSED</Text>
@@ -337,21 +379,9 @@ export const VideoPlayerView = ({
         </View>
       )}
 
-      {/* 7. Live Movie Dialogue Subtitle Banner */}
-      {currentScene.caption ? (
-        <View style={styles.captionContainer} pointerEvents="none">
-          <View style={styles.captionPill}>
-            {currentScene.speaker ? (
-              <Text style={styles.captionSpeaker}>{currentScene.speaker}</Text>
-            ) : null}
-            <Text style={styles.captionText}>{currentScene.caption}</Text>
-          </View>
-        </View>
-      ) : null}
-
-      {/* 8. Bottom Cinema Playback Control Bar */}
+      {/* 7. Bottom Cinema Playback Control Bar */}
       <View style={styles.bottomControls}>
-        {/* Progress Bar & Time Stamps */}
+        {/* Progress Bar & Real Time Stamps */}
         <View style={styles.progressRow}>
           <Text style={styles.timeLabel}>{formatTime(currentTimeSec)}</Text>
           <View style={styles.progressBarTrack}>
@@ -423,56 +453,33 @@ export const VideoPlayerView = ({
 const styles = StyleSheet.create({
   playerContainer: {
     flex: 1,
-    backgroundColor: '#030712',
+    backgroundColor: '#000000',
     position: 'relative',
     justifyContent: 'space-between',
     zIndex: 100,
   },
-  nativeVideoBackground: {
+  surfaceWrapper: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 0,
-    opacity: 0.01,
+    backgroundColor: '#000000',
+    zIndex: 1,
   },
-  nativeVideo: {
+  surfaceView: {
     width: '100%',
     height: '100%',
   },
-  cinemaBackdrop: {
+  loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 1,
-  },
-  captionContainer: {
-    position: 'absolute',
-    bottom: 120,
-    left: 48,
-    right: 48,
+    justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 15,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    zIndex: 2,
   },
-  captionPill: {
-    backgroundColor: 'rgba(3, 7, 18, 0.85)',
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    maxWidth: 880,
-    alignItems: 'center',
-  },
-  captionSpeaker: {
-    color: '#38BDF8',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  captionText: {
-    color: '#F8FAFC',
+  loadingText: {
+    color: '#E2E8F0',
     fontSize: 16,
     fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 22,
+    marginTop: 16,
+    letterSpacing: 0.5,
   },
   topVignette: {
     position: 'absolute',
@@ -480,7 +487,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 140,
-    backgroundColor: 'rgba(3, 7, 18, 0.65)',
+    backgroundColor: 'rgba(3, 7, 18, 0.75)',
     zIndex: 3,
   },
   bottomVignette: {
@@ -489,43 +496,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 180,
-    backgroundColor: 'rgba(3, 7, 18, 0.75)',
+    backgroundColor: 'rgba(3, 7, 18, 0.85)',
     zIndex: 3,
-  },
-  streamBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  streamBadgePlaying: {
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.4)',
-  },
-  streamBadgePaused: {
-    backgroundColor: 'rgba(245, 158, 11, 0.2)',
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.4)',
-  },
-  streamDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 6,
-  },
-  streamDotPlaying: {
-    backgroundColor: '#10B981',
-  },
-  streamDotPaused: {
-    backgroundColor: '#F59E0B',
-  },
-  streamBadgeText: {
-    color: '#F8FAFC',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
   },
   topHeader: {
     position: 'absolute',
@@ -603,19 +575,55 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   metaEngineText: {
-    color: '#06B6D4',
-    fontSize: 13,
+    color: '#38BDF8',
+    fontSize: 12,
     fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  streamBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  streamBadgePlaying: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+  },
+  streamBadgePaused: {
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+  },
+  streamDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
+  },
+  streamDotPlaying: {
+    backgroundColor: '#10B981',
+  },
+  streamDotPaused: {
+    backgroundColor: '#F59E0B',
+  },
+  streamBadgeText: {
+    color: '#F8FAFC',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   ambientPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(6, 182, 212, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(6, 182, 212, 0.4)',
+    backgroundColor: 'rgba(3, 7, 18, 0.8)',
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.35)',
   },
   ambientDot: {
     width: 8,
@@ -625,7 +633,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   ambientDotActive: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#38BDF8',
   },
   ambientPillText: {
     color: '#E0F2FE',
@@ -643,19 +651,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(3, 7, 18, 0.85)',
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    borderRadius: 36,
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   pausedIcon: {
-    fontSize: 22,
+    fontSize: 24,
     color: '#F8FAFC',
     marginRight: 12,
   },
   pausedText: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '800',
     color: '#F8FAFC',
     letterSpacing: 2,
@@ -673,12 +681,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   timeLabel: {
-    color: '#CBD5E1',
-    fontSize: 15,
-    fontFamily: 'monospace',
-    fontWeight: '600',
-    minWidth: 54,
+    color: '#E2E8F0',
+    fontSize: 14,
+    fontWeight: '700',
+    minWidth: 48,
     textAlign: 'center',
+    fontVariant: ['tabular-nums'],
   },
   progressBarTrack: {
     flex: 1,
@@ -691,7 +699,7 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#06B6D4',
+    backgroundColor: colors.accentGold,
     borderRadius: 4,
   },
   progressBarThumb: {
@@ -700,60 +708,58 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: colors.accentGold,
     marginLeft: -8,
-    shadowColor: '#000',
-    shadowOpacity: 0.5,
-    shadowRadius: 4,
   },
   controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
   },
   controlBtn: {
-    backgroundColor: 'rgba(30, 41, 59, 0.85)',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 12,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
     borderWidth: 1.5,
     borderColor: 'rgba(255, 255, 255, 0.15)',
     marginRight: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   controlBtnFocused: {
     backgroundColor: '#FFFFFF',
     borderColor: colors.accentGold,
-    transform: [{scale: 1.06}],
+    transform: [{scale: 1.05}],
   },
   controlBtnText: {
     color: '#F8FAFC',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
   },
   primaryControlBtn: {
-    backgroundColor: '#06B6D4',
-    borderColor: '#22D3EE',
-    minWidth: 140,
+    backgroundColor: colors.accentGold,
+    borderColor: colors.accentGold,
+    paddingHorizontal: 28,
   },
   primaryControlBtnText: {
-    color: '#041E26',
-    fontSize: 16,
+    color: '#0F172A',
+    fontSize: 15,
     fontWeight: '800',
   },
   recapBtn: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(245, 158, 11, 0.2)',
-    borderColor: 'rgba(245, 158, 11, 0.5)',
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderColor: 'rgba(245, 158, 11, 0.4)',
   },
   recapBtnIcon: {
     fontSize: 16,
+    color: '#F59E0B',
     marginRight: 8,
   },
   recapBtnText: {
     color: '#FDE68A',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
   },
 });
