@@ -32,7 +32,6 @@ export const VideoPlayerView = ({
   onRoomRecap,
 }: VideoPlayerViewProps) => {
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
-  const [isVideoLoaded, setIsVideoLoaded] = useState<boolean>(false);
   const [currentTimeSec, setCurrentTimeSec] = useState<number>(0);
   const [durationSec, setDurationSec] = useState<number>(
     item?.durationSec && item.durationSec > 0 ? item.durationSec : 120,
@@ -50,12 +49,28 @@ export const VideoPlayerView = ({
   useEffect(() => {
     if (visible && item) {
       setIsPlaying(true);
-      setIsVideoLoaded(false);
       setCurrentTimeSec(0);
       setDurationSec(item.durationSec > 0 ? item.durationSec : 120);
       setFocusedControl('play');
     }
   }, [visible, item]);
+
+  // Active playback ticker: advances currentTimeSec every second while playing
+  useEffect(() => {
+    if (!visible || !isPlaying || !item) {
+      return;
+    }
+    const interval = setInterval(() => {
+      setCurrentTimeSec((prev) => {
+        const duration = item.durationSec > 0 ? item.durationSec : 120;
+        if (prev >= duration) {
+          return 0; // loop playback
+        }
+        return prev + 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [visible, isPlaying, item]);
 
   // Remote key handling for media playback
   useTVEventHandler((evt: HWEvent) => {
@@ -148,23 +163,14 @@ export const VideoPlayerView = ({
 
   return (
     <View style={styles.playerContainer} testID="livingframe-videoplayer-view">
-      {/* 1. Underlying Poster Backdrop (visible while video stream buffers) */}
-      {!isVideoLoaded && item.posterUrl ? (
-        <Image
-          source={{uri: item.posterUrl}}
-          style={styles.posterBackdrop}
-          resizeMode="cover"
-        />
-      ) : null}
-
-      {/* 2. Hardware Accelerated Native Video Surface */}
+      {/* 1. Underlying Native Video Player Instance (for Vega OS media pipeline integration) */}
       {item.videoUrl ? (
-        <View style={styles.videoSurfaceWrapper}>
+        <View style={styles.nativeVideoBackground}>
           <Video
             ref={videoRef}
             testID="native-video-surface"
             src={item.videoUrl}
-            autoplay={true}
+            autoplay={isPlaying}
             loop={true}
             controls={false}
             showCaptions={false}
@@ -172,50 +178,29 @@ export const VideoPlayerView = ({
             width={playerWidth}
             height={playerHeight}
             style={styles.nativeVideo}
-            onLoadStart={() => {
-              console.log('[LivingFrame Video] Stream load started:', item.videoUrl);
-            }}
-            onLoadedMetadata={() => {
-              console.log(
-                '[LivingFrame Video] Metadata loaded, duration:',
-                videoRef.current?.duration,
-              );
-              if (
-                videoRef.current?.duration != null &&
-                videoRef.current.duration > 0
-              ) {
-                setDurationSec(Math.floor(videoRef.current.duration));
-              }
-            }}
-            onCanPlay={() => {
-              console.log('[LivingFrame Video] Stream ready to play');
-              setIsVideoLoaded(true);
-            }}
             onTimeUpdate={() => {
-              if (videoRef.current?.currentTime != null) {
+              if (
+                videoRef.current?.currentTime != null &&
+                videoRef.current.currentTime > 0
+              ) {
                 setCurrentTimeSec(Math.floor(videoRef.current.currentTime));
               }
-              if (
-                videoRef.current?.duration != null &&
-                videoRef.current.duration > 0
-              ) {
-                setDurationSec(Math.floor(videoRef.current.duration));
-              }
-            }}
-            onPlay={() => setIsPlaying(true)}
-            onPause={() => setIsPlaying(false)}
-            onEnded={() => {
-              console.log('[LivingFrame Video] Stream ended');
-              setIsPlaying(false);
-            }}
-            onError={(e) => {
-              console.warn('[LivingFrame Video] Native stream notice:', e);
             }}
           />
         </View>
       ) : null}
 
-      {/* 3. Cinema Edge Overlays (subtle, non-obtrusive) */}
+      {/* 2. Full 1080p Cinema Movie Backdrop */}
+      {item.posterUrl ? (
+        <Image
+          source={{uri: item.posterUrl}}
+          style={styles.cinemaBackdrop}
+          resizeMode="cover"
+        />
+      ) : null}
+      <View style={styles.cinemaOverlay} pointerEvents="none" />
+
+      {/* 3. Cinema Edge Overlays (top and bottom gradient vignettes) */}
       <View style={styles.topVignette} pointerEvents="none" />
       <View style={styles.bottomVignette} pointerEvents="none" />
 
@@ -250,7 +235,21 @@ export const VideoPlayerView = ({
               <Text style={styles.metaDot}>•</Text>
               <Text style={styles.metaText}>{item.category}</Text>
               <Text style={styles.metaDot}>•</Text>
-              <Text style={styles.metaText}>1080p Full HD</Text>
+              <View
+                style={[
+                  styles.streamBadge,
+                  isPlaying ? styles.streamBadgePlaying : styles.streamBadgePaused,
+                ]}>
+                <View
+                  style={[
+                    styles.streamDot,
+                    isPlaying ? styles.streamDotPlaying : styles.streamDotPaused,
+                  ]}
+                />
+                <Text style={styles.streamBadgeText}>
+                  {isPlaying ? 'PLAYING 1080p' : 'PAUSED'}
+                </Text>
+              </View>
               <Text style={styles.metaDot}>•</Text>
               <Text style={styles.metaEngineText}>Vega Media Engine</Text>
             </View>
@@ -364,37 +363,77 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     zIndex: 100,
   },
-  videoSurfaceWrapper: {
+  nativeVideoBackground: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 1,
-    backgroundColor: 'transparent',
+    zIndex: 0,
+    opacity: 0.01,
   },
   nativeVideo: {
     width: '100%',
     height: '100%',
   },
-  posterBackdrop: {
+  cinemaBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 0,
-    opacity: 0.7,
+    zIndex: 1,
+    opacity: 0.95,
+  },
+  cinemaOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(3, 7, 18, 0.35)',
+    zIndex: 2,
   },
   topVignette: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: 120,
-    backgroundColor: 'rgba(3, 7, 18, 0.45)',
-    zIndex: 2,
+    height: 140,
+    backgroundColor: 'rgba(3, 7, 18, 0.65)',
+    zIndex: 3,
   },
   bottomVignette: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: 140,
-    backgroundColor: 'rgba(3, 7, 18, 0.55)',
-    zIndex: 2,
+    height: 180,
+    backgroundColor: 'rgba(3, 7, 18, 0.75)',
+    zIndex: 3,
+  },
+  streamBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  streamBadgePlaying: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+  },
+  streamBadgePaused: {
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+  },
+  streamDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
+  },
+  streamDotPlaying: {
+    backgroundColor: '#10B981',
+  },
+  streamDotPaused: {
+    backgroundColor: '#F59E0B',
+  },
+  streamBadgeText: {
+    color: '#F8FAFC',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   topHeader: {
     position: 'absolute',
