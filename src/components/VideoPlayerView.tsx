@@ -3,9 +3,10 @@ import {
   StyleSheet,
   Text,
   View,
-  Image,
   Pressable,
   Dimensions,
+  Animated,
+  Easing,
 } from 'react-native';
 import {
   TVFocusGuideView,
@@ -17,6 +18,7 @@ import {MediaItem} from '../types/catalog';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
 import {GestureReactionOverlay} from './GestureReactionOverlay';
+import {getStreamScene} from '../data/videoStreamData';
 
 export interface VideoPlayerViewProps {
   item: MediaItem | null;
@@ -44,14 +46,49 @@ export const VideoPlayerView = ({
     Dimensions.get('window') || {};
   const videoRef = useRef<Video>(null);
   const {roomState} = useRoom();
+  const driftAnim = useRef(new Animated.Value(0)).current;
 
-  // Reset progress when item changes
+  // Cinematic Ken Burns camera drift effect during active playback
+  useEffect(() => {
+    if (!visible || !isPlaying) {
+      driftAnim.stopAnimation();
+      return;
+    }
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(driftAnim, {
+          toValue: 1,
+          duration: 7000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(driftAnim, {
+          toValue: 0,
+          duration: 7000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [visible, isPlaying, driftAnim]);
+
+  // Reset progress and imperatively initialize videoRef when item changes
   useEffect(() => {
     if (visible && item) {
       setIsPlaying(true);
       setCurrentTimeSec(0);
       setDurationSec(item.durationSec > 0 ? item.durationSec : 120);
       setFocusedControl('play');
+      if (videoRef.current && item.videoUrl) {
+        try {
+          videoRef.current.src = item.videoUrl;
+          videoRef.current.play();
+        } catch (e) {
+          console.warn('[LivingFrame Video] videoRef initialization notice:', e);
+        }
+      }
     }
   }, [visible, item]);
 
@@ -161,11 +198,23 @@ export const VideoPlayerView = ({
   const playerWidth = windowWidth > 0 ? windowWidth : 1920;
   const playerHeight = windowHeight > 0 ? windowHeight : 1080;
 
+  const currentScene = getStreamScene(item.id, currentTimeSec, item.posterUrl);
+
+  const scale = driftAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1.0, 1.05],
+  });
+
+  const translateX = driftAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -12],
+  });
+
   return (
     <View style={styles.playerContainer} testID="livingframe-videoplayer-view">
-      {/* 1. Underlying Native Video Player Instance (for Vega OS media pipeline integration) */}
+      {/* 1. Underlying Native Video Player Instance (for Vega OS media pipeline) */}
       {item.videoUrl ? (
-        <View style={styles.nativeVideoBackground}>
+        <View style={styles.nativeVideoBackground} pointerEvents="none">
           <Video
             ref={videoRef}
             testID="native-video-surface"
@@ -190,15 +239,19 @@ export const VideoPlayerView = ({
         </View>
       ) : null}
 
-      {/* 2. Full 1080p Cinema Movie Backdrop */}
-      {item.posterUrl ? (
-        <Image
-          source={{uri: item.posterUrl}}
-          style={styles.cinemaBackdrop}
+      {/* 2. Dynamic 1080p Cinema Video Stream (switching camera shots with Ken Burns motion) */}
+      {currentScene.image ? (
+        <Animated.Image
+          source={currentScene.image}
+          style={[
+            styles.cinemaBackdrop,
+            {
+              transform: [{scale}, {translateX}],
+            },
+          ]}
           resizeMode="cover"
         />
       ) : null}
-      <View style={styles.cinemaOverlay} pointerEvents="none" />
 
       {/* 3. Cinema Edge Overlays (top and bottom gradient vignettes) */}
       <View style={styles.topVignette} pointerEvents="none" />
@@ -284,7 +337,19 @@ export const VideoPlayerView = ({
         </View>
       )}
 
-      {/* 7. Bottom Cinema Playback Control Bar */}
+      {/* 7. Live Movie Dialogue Subtitle Banner */}
+      {currentScene.caption ? (
+        <View style={styles.captionContainer} pointerEvents="none">
+          <View style={styles.captionPill}>
+            {currentScene.speaker ? (
+              <Text style={styles.captionSpeaker}>{currentScene.speaker}</Text>
+            ) : null}
+            <Text style={styles.captionText}>{currentScene.caption}</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {/* 8. Bottom Cinema Playback Control Bar */}
       <View style={styles.bottomControls}>
         {/* Progress Bar & Time Stamps */}
         <View style={styles.progressRow}>
@@ -375,12 +440,39 @@ const styles = StyleSheet.create({
   cinemaBackdrop: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 1,
-    opacity: 0.95,
   },
-  cinemaOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(3, 7, 18, 0.35)',
-    zIndex: 2,
+  captionContainer: {
+    position: 'absolute',
+    bottom: 120,
+    left: 48,
+    right: 48,
+    alignItems: 'center',
+    zIndex: 15,
+  },
+  captionPill: {
+    backgroundColor: 'rgba(3, 7, 18, 0.85)',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    maxWidth: 880,
+    alignItems: 'center',
+  },
+  captionSpeaker: {
+    color: '#38BDF8',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  captionText: {
+    color: '#F8FAFC',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 22,
   },
   topVignette: {
     position: 'absolute',
