@@ -102,6 +102,7 @@ export const HeroBanner = ({
               onFocus={() => setFocusedBtn('explore')}
               onBlur={() => setFocusedBtn(null)}
               onPress={() => onExplore(item)}
+              hasTVPreferredFocus={true}
               accessibilityRole="button"
               accessibilityLabel={`Watch ${item.title}`}
               testID="hero-btn-explore">

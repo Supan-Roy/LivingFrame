@@ -5,7 +5,7 @@ import {
   View,
   Image,
   Pressable,
-  Modal,
+  Dimensions,
 } from 'react-native';
 import {
   TVFocusGuideView,
@@ -21,18 +21,19 @@ import {GestureReactionOverlay} from './GestureReactionOverlay';
 
 export interface VideoPlayerViewProps {
   item: MediaItem | null;
-  visible: boolean;
+  visible?: boolean;
   onClose: () => void;
   onRoomRecap: (item: MediaItem) => void;
 }
 
 export const VideoPlayerView = ({
   item,
-  visible,
+  visible = true,
   onClose,
   onRoomRecap,
 }: VideoPlayerViewProps) => {
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [isVideoLoaded, setIsVideoLoaded] = useState<boolean>(false);
   const [currentTimeSec, setCurrentTimeSec] = useState<number>(0);
   const [durationSec, setDurationSec] = useState<number>(
     item?.durationSec && item.durationSec > 0 ? item.durationSec : 120,
@@ -41,6 +42,8 @@ export const VideoPlayerView = ({
     'back' | 'play' | 'restart' | 'recap'
   >('play');
 
+  const {width: windowWidth = 1920, height: windowHeight = 1080} =
+    Dimensions.get('window') || {};
   const videoRef = useRef<Video>(null);
   const {roomState} = useRoom();
   const keplerBackHandler = useKeplerBackHandler();
@@ -49,6 +52,7 @@ export const VideoPlayerView = ({
   useEffect(() => {
     if (visible && item) {
       setIsPlaying(true);
+      setIsVideoLoaded(false);
       setCurrentTimeSec(0);
       setDurationSec(item.durationSec > 0 ? item.durationSec : 120);
       setFocusedControl('play');
@@ -109,11 +113,19 @@ export const VideoPlayerView = ({
   }, [visible, onClose, keplerBackHandler]);
 
   const handlePlay = useCallback(() => {
-    if (videoRef.current && typeof videoRef.current.play === 'function') {
+    if (videoRef.current) {
       try {
+        if (
+          videoRef.current.currentTime != null &&
+          videoRef.current.duration != null &&
+          videoRef.current.currentTime >= videoRef.current.duration
+        ) {
+          videoRef.current.currentTime = 0;
+          setCurrentTimeSec(0);
+        }
         videoRef.current.play();
       } catch (e) {
-        console.warn('video.play() failed', e);
+        console.warn('[LivingFrame Video] video.play() notice:', e);
       }
     }
     setIsPlaying(true);
@@ -124,7 +136,7 @@ export const VideoPlayerView = ({
       try {
         videoRef.current.pause();
       } catch (e) {
-        console.warn('video.pause() failed', e);
+        console.warn('[LivingFrame Video] video.pause() notice:', e);
       }
     }
     setIsPlaying(false);
@@ -143,14 +155,14 @@ export const VideoPlayerView = ({
       try {
         videoRef.current.currentTime = 0;
       } catch (e) {
-        console.warn('resetting currentTime failed', e);
+        console.warn('[LivingFrame Video] resetting currentTime notice:', e);
       }
     }
     setCurrentTimeSec(0);
     handlePlay();
   }, [handlePlay]);
 
-  if (!item || !visible) {
+  if (!item || visible === false) {
     return null;
   }
 
@@ -165,196 +177,230 @@ export const VideoPlayerView = ({
       ? Math.min(100, Math.max(0, (currentTimeSec / durationSec) * 100))
       : 0;
 
-  return (
-    <Modal
-      visible={visible}
-      transparent={false}
-      animationType="fade"
-      onRequestClose={onClose}>
-      <View style={styles.playerContainer} testID="livingframe-videoplayer-view">
-        {/* 1. Hardware Accelerated Native Video Surface */}
-        {item.videoUrl ? (
-          <View style={styles.videoSurfaceWrapper}>
-            <Video
-              ref={videoRef}
-              testID="native-video-surface"
-              src={item.videoUrl}
-              autoplay={isPlaying}
-              controls={false}
-              showCaptions={false}
-              scalingmode="fit"
-              width={1920}
-              height={1080}
-              style={styles.nativeVideo}
-              onTimeUpdate={() => {
-                if (videoRef.current?.currentTime != null) {
-                  setCurrentTimeSec(Math.floor(videoRef.current.currentTime));
-                }
-                if (
-                  videoRef.current?.duration != null &&
-                  videoRef.current.duration > 0
-                ) {
-                  setDurationSec(Math.floor(videoRef.current.duration));
-                }
-              }}
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
-              onEnded={() => {
-                setIsPlaying(false);
-              }}
-              onError={(e) => {
-                console.warn('[LivingFrame Video] Native stream notice:', e);
-              }}
-            />
-          </View>
-        ) : null}
+  const playerWidth = windowWidth > 0 ? windowWidth : 1920;
+  const playerHeight = windowHeight > 0 ? windowHeight : 1080;
 
-        {/* 2. Cinema Backdrop Image for buffer / zero-latency preview */}
+  return (
+    <View style={styles.playerContainer} testID="livingframe-videoplayer-view">
+      {/* 1. Underlying Poster Backdrop (visible while video stream buffers) */}
+      {!isVideoLoaded && item.posterUrl ? (
         <Image
           source={{uri: item.posterUrl}}
           style={styles.posterBackdrop}
           resizeMode="cover"
         />
+      ) : null}
 
-        {/* 3. Dark Cinema Gradient Overlays */}
-        <View style={styles.topVignette} pointerEvents="none" />
-        <View style={styles.bottomVignette} pointerEvents="none" />
+      {/* 2. Hardware Accelerated Native Video Surface */}
+      {item.videoUrl ? (
+        <View style={styles.videoSurfaceWrapper}>
+          <Video
+            ref={videoRef}
+            testID="native-video-surface"
+            src={item.videoUrl}
+            autoplay={true}
+            loop={true}
+            controls={false}
+            showCaptions={false}
+            scalingmode="fit"
+            width={playerWidth}
+            height={playerHeight}
+            style={styles.nativeVideo}
+            onLoadStart={() => {
+              console.log('[LivingFrame Video] Stream load started:', item.videoUrl);
+            }}
+            onLoadedMetadata={() => {
+              console.log(
+                '[LivingFrame Video] Metadata loaded, duration:',
+                videoRef.current?.duration,
+              );
+              if (
+                videoRef.current?.duration != null &&
+                videoRef.current.duration > 0
+              ) {
+                setDurationSec(Math.floor(videoRef.current.duration));
+              }
+              if (isPlaying) {
+                try {
+                  videoRef.current?.play();
+                } catch (e) {
+                  console.warn('[LivingFrame Video] Play error on metadata:', e);
+                }
+              }
+            }}
+            onCanPlay={() => {
+              console.log('[LivingFrame Video] Stream ready to play');
+              setIsVideoLoaded(true);
+              if (isPlaying) {
+                try {
+                  videoRef.current?.play();
+                } catch (e) {
+                  console.warn('[LivingFrame Video] Play error on canplay:', e);
+                }
+              }
+            }}
+            onTimeUpdate={() => {
+              if (videoRef.current?.currentTime != null) {
+                setCurrentTimeSec(Math.floor(videoRef.current.currentTime));
+              }
+              if (
+                videoRef.current?.duration != null &&
+                videoRef.current.duration > 0
+              ) {
+                setDurationSec(Math.floor(videoRef.current.duration));
+              }
+            }}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            onEnded={() => {
+              console.log('[LivingFrame Video] Stream ended');
+              setIsPlaying(false);
+            }}
+            onError={(e) => {
+              console.warn('[LivingFrame Video] Native stream notice:', e);
+            }}
+          />
+        </View>
+      ) : null}
 
-        {/* 4. Live Room Awareness Gesture Reaction Overlay */}
-        <GestureReactionOverlay onOpenRecap={() => onRoomRecap(item)} />
+      {/* 3. Cinema Edge Overlays (subtle, non-obtrusive) */}
+      <View style={styles.topVignette} pointerEvents="none" />
+      <View style={styles.bottomVignette} pointerEvents="none" />
 
-        {/* 5. Top Navigation & Info HUD */}
-        <View style={styles.topHeader}>
-          <TVFocusGuideView style={styles.headerRow}>
-            <Pressable
-              style={[
-                styles.hudButton,
-                focusedControl === 'back' && styles.hudButtonFocused,
-              ]}
-              onFocus={() => setFocusedControl('back')}
-              onPress={onClose}
-              accessibilityRole="button"
-              accessibilityLabel="Back to Browse"
-              testID="btn-player-back">
-              <Text style={styles.hudButtonIcon}>←</Text>
-              <Text style={styles.hudButtonText}>Back to Browse</Text>
-            </Pressable>
+      {/* 4. Live Room Awareness Gesture Reaction Overlay */}
+      <GestureReactionOverlay onOpenRecap={() => onRoomRecap(item)} />
 
-            <View style={styles.titleGroup}>
-              <Text style={styles.playerTitle} numberOfLines={1}>
-                {item.title}
-              </Text>
-              <View style={styles.metaRow}>
-                <View style={styles.ratingBadge}>
-                  <Text style={styles.ratingBadgeText}>{item.contentRating}</Text>
-                </View>
-                <Text style={styles.metaDot}>•</Text>
-                <Text style={styles.metaText}>{item.category}</Text>
-                <Text style={styles.metaDot}>•</Text>
-                <Text style={styles.metaText}>1080p Full HD</Text>
-                <Text style={styles.metaDot}>•</Text>
-                <Text style={styles.metaEngineText}>Vega Media Engine</Text>
+      {/* 5. Top Navigation & Info HUD */}
+      <View style={styles.topHeader}>
+        <TVFocusGuideView style={styles.headerRow}>
+          <Pressable
+            style={[
+              styles.hudButton,
+              focusedControl === 'back' && styles.hudButtonFocused,
+            ]}
+            onFocus={() => setFocusedControl('back')}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Back to Browse"
+            testID="btn-player-back">
+            <Text style={styles.hudButtonIcon}>←</Text>
+            <Text style={styles.hudButtonText}>Back to Browse</Text>
+          </Pressable>
+
+          <View style={styles.titleGroup}>
+            <Text style={styles.playerTitle} numberOfLines={1}>
+              {item.title}
+            </Text>
+            <View style={styles.metaRow}>
+              <View style={styles.ratingBadge}>
+                <Text style={styles.ratingBadgeText}>{item.contentRating}</Text>
               </View>
-            </View>
-
-            {/* Room Sensing Status Indicator */}
-            <View style={styles.ambientPill}>
-              <View
-                style={[
-                  styles.ambientDot,
-                  roomState.sensorStatus === 'active' && styles.ambientDotActive,
-                ]}
-              />
-              <Text style={styles.ambientPillText}>
-                {roomState.activeGesture
-                  ? `ROOM: ${roomState.activeGesture.toUpperCase()}`
-                  : roomState.sensorStatus === 'active'
-                  ? 'ROOM SENSOR ACTIVE'
-                  : 'AMBIENT SYNC ON'}
-              </Text>
-            </View>
-          </TVFocusGuideView>
-        </View>
-
-        {/* 6. Center Pause Watermark Indicator */}
-        {!isPlaying && (
-          <View style={styles.pausedIndicator}>
-            <View style={styles.pausedBadge}>
-              <Text style={styles.pausedIcon}>⏸</Text>
-              <Text style={styles.pausedText}>PAUSED</Text>
+              <Text style={styles.metaDot}>•</Text>
+              <Text style={styles.metaText}>{item.category}</Text>
+              <Text style={styles.metaDot}>•</Text>
+              <Text style={styles.metaText}>1080p Full HD</Text>
+              <Text style={styles.metaDot}>•</Text>
+              <Text style={styles.metaEngineText}>Vega Media Engine</Text>
             </View>
           </View>
-        )}
 
-        {/* 7. Bottom Cinema Playback Control Bar */}
-        <View style={styles.bottomControls}>
-          {/* Progress Bar & Time Stamps */}
-          <View style={styles.progressRow}>
-            <Text style={styles.timeLabel}>{formatTime(currentTimeSec)}</Text>
-            <View style={styles.progressBarTrack}>
-              <View
-                style={[styles.progressBarFill, {width: `${progressPercent}%`}]}
-              />
-              <View
-                style={[
-                  styles.progressBarThumb,
-                  {left: `${Math.min(99, progressPercent)}%`},
-                ]}
-              />
-            </View>
-            <Text style={styles.timeLabel}>{formatTime(durationSec)}</Text>
+          {/* Room Sensing Status Indicator */}
+          <View style={styles.ambientPill}>
+            <View
+              style={[
+                styles.ambientDot,
+                roomState.sensorStatus === 'active' && styles.ambientDotActive,
+              ]}
+            />
+            <Text style={styles.ambientPillText}>
+              {roomState.activeGesture
+                ? `ROOM: ${roomState.activeGesture.toUpperCase()}`
+                : roomState.sensorStatus === 'active'
+                ? 'ROOM SENSOR ACTIVE'
+                : 'AMBIENT SYNC ON'}
+            </Text>
           </View>
-
-          {/* Interactive TV Remote Control Buttons */}
-          <TVFocusGuideView style={styles.controlsRow}>
-            <Pressable
-              style={[
-                styles.controlBtn,
-                styles.primaryControlBtn,
-                focusedControl === 'play' && styles.controlBtnFocused,
-              ]}
-              onFocus={() => setFocusedControl('play')}
-              onPress={handleTogglePlay}
-              hasTVPreferredFocus={true}
-              accessibilityRole="button"
-              accessibilityLabel={isPlaying ? 'Pause video' : 'Play video'}
-              testID="btn-player-toggle">
-              <Text style={styles.primaryControlBtnText}>
-                {isPlaying ? '⏸  Pause' : '▶  Resume'}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.controlBtn,
-                focusedControl === 'restart' && styles.controlBtnFocused,
-              ]}
-              onFocus={() => setFocusedControl('restart')}
-              onPress={handleRestart}
-              accessibilityRole="button"
-              accessibilityLabel="Restart video from beginning"
-              testID="btn-player-restart">
-              <Text style={styles.controlBtnText}>↺  Restart</Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.controlBtn,
-                styles.recapBtn,
-                focusedControl === 'recap' && styles.controlBtnFocused,
-              ]}
-              onFocus={() => setFocusedControl('recap')}
-              onPress={() => onRoomRecap(item)}
-              accessibilityRole="button"
-              accessibilityLabel="Open ambient room context recap"
-              testID="btn-player-recap">
-              <Text style={styles.recapBtnIcon}>⚡</Text>
-              <Text style={styles.recapBtnText}>Room Context</Text>
-            </Pressable>
-          </TVFocusGuideView>
-        </View>
+        </TVFocusGuideView>
       </View>
-    </Modal>
+
+      {/* 6. Center Pause Watermark Indicator */}
+      {!isPlaying && (
+        <View style={styles.pausedIndicator}>
+          <View style={styles.pausedBadge}>
+            <Text style={styles.pausedIcon}>⏸</Text>
+            <Text style={styles.pausedText}>PAUSED</Text>
+          </View>
+        </View>
+      )}
+
+      {/* 7. Bottom Cinema Playback Control Bar */}
+      <View style={styles.bottomControls}>
+        {/* Progress Bar & Time Stamps */}
+        <View style={styles.progressRow}>
+          <Text style={styles.timeLabel}>{formatTime(currentTimeSec)}</Text>
+          <View style={styles.progressBarTrack}>
+            <View
+              style={[styles.progressBarFill, {width: `${progressPercent}%`}]}
+            />
+            <View
+              style={[
+                styles.progressBarThumb,
+                {left: `${Math.min(99, progressPercent)}%`},
+              ]}
+            />
+          </View>
+          <Text style={styles.timeLabel}>{formatTime(durationSec)}</Text>
+        </View>
+
+        {/* Interactive TV Remote Control Buttons */}
+        <TVFocusGuideView style={styles.controlsRow}>
+          <Pressable
+            style={[
+              styles.controlBtn,
+              styles.primaryControlBtn,
+              focusedControl === 'play' && styles.controlBtnFocused,
+            ]}
+            onFocus={() => setFocusedControl('play')}
+            onPress={handleTogglePlay}
+            hasTVPreferredFocus={true}
+            accessibilityRole="button"
+            accessibilityLabel={isPlaying ? 'Pause video' : 'Play video'}
+            testID="btn-player-toggle">
+            <Text style={styles.primaryControlBtnText}>
+              {isPlaying ? '⏸  Pause' : '▶  Resume'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[
+              styles.controlBtn,
+              focusedControl === 'restart' && styles.controlBtnFocused,
+            ]}
+            onFocus={() => setFocusedControl('restart')}
+            onPress={handleRestart}
+            accessibilityRole="button"
+            accessibilityLabel="Restart video from beginning"
+            testID="btn-player-restart">
+            <Text style={styles.controlBtnText}>↺  Restart</Text>
+          </Pressable>
+
+          <Pressable
+            style={[
+              styles.controlBtn,
+              styles.recapBtn,
+              focusedControl === 'recap' && styles.controlBtnFocused,
+            ]}
+            onFocus={() => setFocusedControl('recap')}
+            onPress={() => onRoomRecap(item)}
+            accessibilityRole="button"
+            accessibilityLabel="Open ambient room context recap"
+            testID="btn-player-recap">
+            <Text style={styles.recapBtnIcon}>⚡</Text>
+            <Text style={styles.recapBtnText}>Room Context</Text>
+          </Pressable>
+        </TVFocusGuideView>
+      </View>
+    </View>
   );
 };
 
@@ -364,11 +410,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#030712',
     position: 'relative',
     justifyContent: 'space-between',
+    zIndex: 100,
   },
   videoSurfaceWrapper: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: 'transparent',
   },
   nativeVideo: {
     width: '100%',
@@ -377,15 +424,15 @@ const styles = StyleSheet.create({
   posterBackdrop: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 0,
-    opacity: 0.35,
+    opacity: 0.7,
   },
   topVignette: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: 220,
-    backgroundColor: 'rgba(3, 7, 18, 0.88)',
+    height: 120,
+    backgroundColor: 'rgba(3, 7, 18, 0.45)',
     zIndex: 2,
   },
   bottomVignette: {
@@ -393,8 +440,8 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 260,
-    backgroundColor: 'rgba(3, 7, 18, 0.92)',
+    height: 140,
+    backgroundColor: 'rgba(3, 7, 18, 0.55)',
     zIndex: 2,
   },
   topHeader: {

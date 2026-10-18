@@ -1,6 +1,7 @@
 import React, {useState, useEffect, useCallback} from 'react';
 import {
   StyleSheet,
+  View,
   ImageBackground,
   ScrollView,
   BackHandler,
@@ -141,6 +142,22 @@ export const LivingFrameHome = () => {
     setRecapModalItem(item);
   };
 
+  if (playingItem) {
+    return (
+      <View style={styles.container}>
+        <VideoPlayerView
+          item={playingItem}
+          visible={true}
+          onClose={() => setPlayingItem(null)}
+          onRoomRecap={(item) => {
+            setPlayingItem(null);
+            setRecapModalItem(item);
+          }}
+        />
+      </View>
+    );
+  }
+
   return (
     <ImageBackground
       source={require('./assets/background.png')}
@@ -197,17 +214,6 @@ export const LivingFrameHome = () => {
         item={recapModalItem}
         visible={Boolean(recapModalItem)}
         onClose={() => setRecapModalItem(null)}
-      />
-
-      {/* 1080p Cinema Video Player View */}
-      <VideoPlayerView
-        item={playingItem}
-        visible={Boolean(playingItem)}
-        onClose={() => setPlayingItem(null)}
-        onRoomRecap={(item) => {
-          setPlayingItem(null);
-          setRecapModalItem(item);
-        }}
       />
     </ImageBackground>
   );
