@@ -5,7 +5,6 @@ import {
   View,
   Image,
   Pressable,
-  Modal,
   ScrollView,
 } from 'react-native';
 import {TVFocusGuideView} from '@amazon-devices/react-native-kepler';
@@ -42,12 +41,7 @@ export const TitleDetailsModal = ({
   };
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
+    <View style={styles.modalBackdrop} testID="title-details-modal">
         <View style={styles.modalCard}>
           {/* Top Hero Art with Overlay */}
           <View style={styles.mediaHeader}>
@@ -140,17 +134,18 @@ export const TitleDetailsModal = ({
           </ScrollView>
         </View>
       </View>
-    </Modal>
   );
 };
 
 const styles = StyleSheet.create({
   modalBackdrop: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(3, 7, 18, 0.88)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 40,
+    zIndex: 100,
+    elevation: 100,
   },
   modalCard: {
     width: 960,

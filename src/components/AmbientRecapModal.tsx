@@ -4,7 +4,6 @@ import {
   Text,
   View,
   Pressable,
-  Modal,
 } from 'react-native';
 import {TVFocusGuideView} from '@amazon-devices/react-native-kepler';
 import {MediaItem} from '../types/catalog';
@@ -30,12 +29,7 @@ export const AmbientRecapModal = ({
   }
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
+    <View style={styles.modalBackdrop} testID="ambient-recap-modal">
         <View style={styles.recapCard}>
           {/* Header */}
           <View style={styles.recapHeader}>
@@ -99,16 +93,17 @@ export const AmbientRecapModal = ({
           </TVFocusGuideView>
         </View>
       </View>
-    </Modal>
   );
 };
 
 const styles = StyleSheet.create({
   modalBackdrop: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(5, 8, 16, 0.92)',
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 100,
+    elevation: 100,
   },
   recapCard: {
     width: 820,

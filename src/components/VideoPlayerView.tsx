@@ -10,7 +10,6 @@ import {
 import {
   TVFocusGuideView,
   useTVEventHandler,
-  useKeplerBackHandler,
   HWEvent,
 } from '@amazon-devices/react-native-kepler';
 import {Video} from '@amazon-devices/react-native-w3cmedia';
@@ -46,7 +45,6 @@ export const VideoPlayerView = ({
     Dimensions.get('window') || {};
   const videoRef = useRef<Video>(null);
   const {roomState} = useRoom();
-  const keplerBackHandler = useKeplerBackHandler();
 
   // Reset progress when item changes
   useEffect(() => {
@@ -59,7 +57,7 @@ export const VideoPlayerView = ({
     }
   }, [visible, item]);
 
-  // Remote key handling
+  // Remote key handling for media playback
   useTVEventHandler((evt: HWEvent) => {
     if (!visible || !evt || !evt.eventType) {
       return;
@@ -79,38 +77,6 @@ export const VideoPlayerView = ({
       handleRestart();
     }
   });
-
-  // Hardware / remote back button handling inside player
-  useEffect(() => {
-    if (!visible) {
-      return;
-    }
-
-    const onBackPress = () => {
-      onClose();
-      return true;
-    };
-
-    let removeSub: (() => void) | undefined;
-    if (
-      keplerBackHandler &&
-      typeof keplerBackHandler.addEventListener === 'function'
-    ) {
-      const sub = keplerBackHandler.addEventListener(
-        'hardwareBackPress',
-        onBackPress,
-      );
-      if (sub && typeof sub.remove === 'function') {
-        removeSub = () => sub.remove();
-      }
-    }
-
-    return () => {
-      if (removeSub) {
-        removeSub();
-      }
-    };
-  }, [visible, onClose, keplerBackHandler]);
 
   const handlePlay = useCallback(() => {
     if (videoRef.current) {
@@ -220,24 +186,10 @@ export const VideoPlayerView = ({
               ) {
                 setDurationSec(Math.floor(videoRef.current.duration));
               }
-              if (isPlaying) {
-                try {
-                  videoRef.current?.play();
-                } catch (e) {
-                  console.warn('[LivingFrame Video] Play error on metadata:', e);
-                }
-              }
             }}
             onCanPlay={() => {
               console.log('[LivingFrame Video] Stream ready to play');
               setIsVideoLoaded(true);
-              if (isPlaying) {
-                try {
-                  videoRef.current?.play();
-                } catch (e) {
-                  console.warn('[LivingFrame Video] Play error on canplay:', e);
-                }
-              }
             }}
             onTimeUpdate={() => {
               if (videoRef.current?.currentTime != null) {

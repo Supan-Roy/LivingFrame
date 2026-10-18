@@ -66,18 +66,22 @@ export const LivingFrameHome = () => {
   });
 
   // Handle remote Back button:
-  // - If video player is open, exit player
-  // - If modal is open, dismiss modal
+  // - If recap modal is open, dismiss recap modal
+  // - If title details modal is open, dismiss details modal
+  // - If video player is open, exit player to browse
   // - If at root screen, exit entire app and return to homescreen
   useEffect(() => {
     const onBackPress = () => {
-      if (playingItem) {
-        setPlayingItem(null);
+      if (recapModalItem) {
+        setRecapModalItem(null);
         return true;
       }
-      if (detailsModalItem || recapModalItem) {
+      if (detailsModalItem) {
         setDetailsModalItem(null);
-        setRecapModalItem(null);
+        return true;
+      }
+      if (playingItem) {
+        setPlayingItem(null);
         return true;
       }
       handleExitApp();
@@ -142,80 +146,87 @@ export const LivingFrameHome = () => {
     setRecapModalItem(item);
   };
 
-  if (playingItem) {
-    return (
-      <View style={styles.container}>
+  const currentScreen: 'browse' | 'player' = playingItem ? 'player' : 'browse';
+
+  return (
+    <View style={styles.container}>
+      {/* Browse Screen */}
+      {currentScreen === 'browse' && (
+        <ImageBackground
+          source={require('./assets/background.png')}
+          style={styles.container}>
+          {/* Top TV Header Bar with LivingFrame Wordmark & Ambient Sensor Status */}
+          <Header />
+
+          {/* Real-time Room Awareness Gesture Reaction Overlay */}
+          <GestureReactionOverlay onOpenRecap={() => setRecapModalItem(featuredItem)} />
+
+          {/* Main TV Vertical Content Flow */}
+          <ScrollView
+            style={styles.mainScroll}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}>
+            {/* Dynamic Hero Section */}
+            <HeroBanner
+              item={featuredItem}
+              onExplore={handleExplore}
+              onMoreInfo={handleMoreInfo}
+              onRoomRecap={handleRoomRecap}
+            />
+
+            {/* Content Rows */}
+            {categories.map((category, index) => (
+              <ContentRow
+                key={category.id}
+                category={category}
+                focusedItemId={focusedItemId}
+                onItemFocus={handleCardFocus}
+                onItemSelect={handleCardSelect}
+                isFirstRow={index === 0}
+              />
+            ))}
+          </ScrollView>
+        </ImageBackground>
+      )}
+
+      {/* Video Player Screen */}
+      {currentScreen === 'player' && playingItem && (
         <VideoPlayerView
           item={playingItem}
           visible={true}
           onClose={() => setPlayingItem(null)}
           onRoomRecap={(item) => {
-            setPlayingItem(null);
             setRecapModalItem(item);
           }}
         />
-      </View>
-    );
-  }
+      )}
 
-  return (
-    <ImageBackground
-      source={require('./assets/background.png')}
-      style={styles.container}>
-      {/* Top TV Header Bar with LivingFrame Wordmark & Ambient Sensor Status */}
-      <Header />
-
-      {/* Real-time Room Awareness Gesture Reaction Overlay */}
-      <GestureReactionOverlay onOpenRecap={() => setRecapModalItem(featuredItem)} />
-
-      {/* Main TV Vertical Content Flow */}
-      <ScrollView
-        style={styles.mainScroll}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}>
-        {/* Dynamic Hero Section */}
-        <HeroBanner
-          item={featuredItem}
-          onExplore={handleExplore}
-          onMoreInfo={handleMoreInfo}
-          onRoomRecap={handleRoomRecap}
+      {/* Title Details Modal (as View overlay) */}
+      {detailsModalItem && !playingItem && (
+        <TitleDetailsModal
+          item={detailsModalItem}
+          visible={true}
+          onClose={() => setDetailsModalItem(null)}
+          onPlay={(item) => {
+            setDetailsModalItem(null);
+            setPlayingItem(item);
+          }}
+          onRoomRecap={(item) => {
+            setDetailsModalItem(null);
+            setRecapModalItem(item);
+          }}
         />
+      )}
 
-        {/* Content Rows */}
-        {categories.map((category, index) => (
-          <ContentRow
-            key={category.id}
-            category={category}
-            focusedItemId={focusedItemId}
-            onItemFocus={handleCardFocus}
-            onItemSelect={handleCardSelect}
-            isFirstRow={index === 0}
-          />
-        ))}
-      </ScrollView>
-
-      {/* Title Details Modal */}
-      <TitleDetailsModal
-        item={detailsModalItem}
-        visible={Boolean(detailsModalItem)}
-        onClose={() => setDetailsModalItem(null)}
-        onPlay={(item) => {
-          setDetailsModalItem(null);
-          setPlayingItem(item);
-        }}
-        onRoomRecap={(item) => {
-          setDetailsModalItem(null);
-          setRecapModalItem(item);
-        }}
-      />
-
-      {/* Ambient Room Context Recap Modal */}
-      <AmbientRecapModal
-        item={recapModalItem}
-        visible={Boolean(recapModalItem)}
-        onClose={() => setRecapModalItem(null)}
-      />
-    </ImageBackground>
+      {/* Ambient Room Context Recap Modal (as View overlay) */}
+      {recapModalItem && (
+        <AmbientRecapModal
+          item={recapModalItem}
+          visible={true}
+          onClose={() => setRecapModalItem(null)}
+        />
+      )}
+    </View>
   );
 };
 
