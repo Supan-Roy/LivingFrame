@@ -138,7 +138,9 @@ export class CatalogService {
           contentRating: item.content_rating || 'TV-G',
           durationSec: getRealisticDuration(item),
           trending: item.trending ?? false,
-          videoUrl: videoSource?.url,
+          videoUrl:
+            videoSource?.url ||
+            `https://giolaq.github.io/scrap-tv-feed/content/${item.id}/movie_1080p.mp4`,
           aiContextHint: 'Room Presence Active',
         };
       });

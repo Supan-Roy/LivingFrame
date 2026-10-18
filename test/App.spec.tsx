@@ -1,10 +1,29 @@
 import 'react-native';
-import {render} from '@testing-library/react-native';
+import {render, fireEvent} from '@testing-library/react-native';
 import * as React from 'react';
 import {
   useTVEventHandler,
   useKeplerBackHandler,
 } from '@amazon-devices/react-native-kepler';
+
+jest.mock('@amazon-devices/react-native-w3cmedia', () => {
+  const ReactModule = require('react');
+  const {View} = require('react-native');
+  return {
+    Video: ReactModule.forwardRef((props: any, ref: any) => {
+      ReactModule.useImperativeHandle(ref, () => ({
+        play: jest.fn(),
+        pause: jest.fn(),
+        currentTime: 0,
+        duration: 120,
+      }));
+      return ReactModule.createElement(View, {
+        ...props,
+        testID: props.testID || 'mock-native-video-surface',
+      });
+    }),
+  };
+});
 
 import {App} from '../src/App';
 
@@ -61,5 +80,22 @@ describe('LivingFrame App', () => {
     const backCallback = mockBackHandler.addEventListener.mock.calls[0][1];
     backCallback();
     expect(mockBackHandler.exitApp).toHaveBeenCalled();
+  });
+
+  it('plays video when Watch Now is pressed on HeroBanner', () => {
+    const screen = render(<App />);
+
+    const watchNowBtn = screen.getByTestId('hero-btn-explore');
+    expect(watchNowBtn).toBeTruthy();
+
+    fireEvent.press(watchNowBtn);
+
+    expect(screen.getByTestId('livingframe-videoplayer-view')).toBeTruthy();
+    expect(screen.getByTestId('btn-player-back')).toBeTruthy();
+    expect(screen.getByTestId('btn-player-toggle')).toBeTruthy();
+
+    // Press Back to browse
+    fireEvent.press(screen.getByTestId('btn-player-back'));
+    expect(screen.queryByTestId('livingframe-videoplayer-view')).toBeNull();
   });
 });

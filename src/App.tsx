@@ -20,6 +20,7 @@ import {ContentRow} from './components/ContentRow';
 import {TitleDetailsModal} from './components/TitleDetailsModal';
 import {AmbientRecapModal} from './components/AmbientRecapModal';
 import {GestureReactionOverlay} from './components/GestureReactionOverlay';
+import {VideoPlayerView} from './components/VideoPlayerView';
 import {colors} from './theme/theme';
 
 export const LivingFrameHome = () => {
@@ -32,6 +33,7 @@ export const LivingFrameHome = () => {
   );
   const [detailsModalItem, setDetailsModalItem] = useState<MediaItem | null>(null);
   const [recapModalItem, setRecapModalItem] = useState<MediaItem | null>(null);
+  const [playingItem, setPlayingItem] = useState<MediaItem | null>(null);
 
   const keplerBackHandler = useKeplerBackHandler();
 
@@ -55,6 +57,7 @@ export const LivingFrameHome = () => {
       eventType === 'media_top_menu' ||
       eventType.includes('home')
     ) {
+      setPlayingItem(null);
       setDetailsModalItem(null);
       setRecapModalItem(null);
       handleExitApp();
@@ -62,10 +65,15 @@ export const LivingFrameHome = () => {
   });
 
   // Handle remote Back button:
+  // - If video player is open, exit player
   // - If modal is open, dismiss modal
   // - If at root screen, exit entire app and return to homescreen
   useEffect(() => {
     const onBackPress = () => {
+      if (playingItem) {
+        setPlayingItem(null);
+        return true;
+      }
       if (detailsModalItem || recapModalItem) {
         setDetailsModalItem(null);
         setRecapModalItem(null);
@@ -93,7 +101,7 @@ export const LivingFrameHome = () => {
         removeSub();
       }
     };
-  }, [detailsModalItem, recapModalItem, handleExitApp, keplerBackHandler]);
+  }, [playingItem, detailsModalItem, recapModalItem, handleExitApp, keplerBackHandler]);
 
   // Fetch verified catalog updates on load
   useEffect(() => {
@@ -122,7 +130,7 @@ export const LivingFrameHome = () => {
   };
 
   const handleExplore = (item: MediaItem) => {
-    setDetailsModalItem(item);
+    setPlayingItem(item);
   };
 
   const handleMoreInfo = (item: MediaItem) => {
@@ -174,9 +182,9 @@ export const LivingFrameHome = () => {
         item={detailsModalItem}
         visible={Boolean(detailsModalItem)}
         onClose={() => setDetailsModalItem(null)}
-        onPlay={(_item) => {
-          // Future playback milestone trigger
+        onPlay={(item) => {
           setDetailsModalItem(null);
+          setPlayingItem(item);
         }}
         onRoomRecap={(item) => {
           setDetailsModalItem(null);
@@ -189,6 +197,17 @@ export const LivingFrameHome = () => {
         item={recapModalItem}
         visible={Boolean(recapModalItem)}
         onClose={() => setRecapModalItem(null)}
+      />
+
+      {/* 1080p Cinema Video Player View */}
+      <VideoPlayerView
+        item={playingItem}
+        visible={Boolean(playingItem)}
+        onClose={() => setPlayingItem(null)}
+        onRoomRecap={(item) => {
+          setPlayingItem(null);
+          setRecapModalItem(item);
+        }}
       />
     </ImageBackground>
   );

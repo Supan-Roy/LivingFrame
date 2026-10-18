@@ -16,7 +16,7 @@ export const fallbackMediaItems: MediaItem[] = [
     durationSec: 5100,
     trending: true,
     videoUrl:
-      'https://giolaq.github.io/scrap-tv-feed/content/behind-the-screams/behind-the-screams.mp4',
+      'https://giolaq.github.io/scrap-tv-feed/content/behind-the-screams/movie_1080p.mp4',
     aiContextHint:
       'Room Activity: 2 viewers engaged. Recommended for casual evening viewing.',
   },
@@ -34,6 +34,8 @@ export const fallbackMediaItems: MediaItem[] = [
     contentRating: 'TV-G',
     durationSec: 2520,
     trending: true,
+    videoUrl:
+      'https://giolaq.github.io/scrap-tv-feed/content/cereal-streamz/movie_1080p.mp4',
     aiContextHint: 'Morning Routine: Upbeat tone suitable for morning coffee & kids.',
   },
   {
@@ -50,6 +52,8 @@ export const fallbackMediaItems: MediaItem[] = [
     contentRating: 'TV-G',
     durationSec: 3300,
     trending: true,
+    videoUrl:
+      'https://giolaq.github.io/scrap-tv-feed/content/feline-assistant/movie_1080p.mp4',
     aiContextHint: 'Pet Alert: Low frequency purr track calms room pets.',
   },
   {
@@ -66,6 +70,8 @@ export const fallbackMediaItems: MediaItem[] = [
     contentRating: 'TV-14',
     durationSec: 6900,
     trending: true,
+    videoUrl:
+      'https://giolaq.github.io/scrap-tv-feed/content/the-beige-knight/movie_1080p.mp4',
     aiContextHint: 'Action Mode: Rich surround effects activated.',
   },
   {
@@ -81,6 +87,8 @@ export const fallbackMediaItems: MediaItem[] = [
     ratingStars: 4.5,
     contentRating: 'TV-G',
     durationSec: 7200,
+    videoUrl:
+      'https://giolaq.github.io/scrap-tv-feed/content/meditation-in-beige/movie_1080p.mp4',
     aiContextHint:
       'Ambient Sensing: Ideal backdrop when room conversations are active.',
   },
@@ -97,6 +105,8 @@ export const fallbackMediaItems: MediaItem[] = [
     ratingStars: 4.8,
     contentRating: 'TV-G',
     durationSec: 3840,
+    videoUrl:
+      'https://giolaq.github.io/scrap-tv-feed/content/the-accounting-cats/movie_1080p.mp4',
     aiContextHint: 'Lighthearted Comedy: Ideal for multi-generational viewing.',
   },
   {
@@ -112,6 +122,8 @@ export const fallbackMediaItems: MediaItem[] = [
     ratingStars: 4.4,
     contentRating: 'TV-PG',
     durationSec: 5400,
+    videoUrl:
+      'https://giolaq.github.io/scrap-tv-feed/content/parking-wars/movie_1080p.mp4',
     aiContextHint: 'Viewer Recap: Available if a room member stepped in late.',
   },
   {
@@ -127,6 +139,8 @@ export const fallbackMediaItems: MediaItem[] = [
     ratingStars: 4.3,
     contentRating: 'TV-G',
     durationSec: 4500,
+    videoUrl:
+      'https://giolaq.github.io/scrap-tv-feed/content/the-art-of-waiting/movie_1080p.mp4',
     aiContextHint: 'Philosophical Slow-TV for tranquil evenings.',
   },
   {
@@ -142,6 +156,8 @@ export const fallbackMediaItems: MediaItem[] = [
     ratingStars: 4.7,
     contentRating: 'TV-PG',
     durationSec: 4200,
+    videoUrl:
+      'https://giolaq.github.io/scrap-tv-feed/content/startup-strays/movie_1080p.mp4',
     aiContextHint: 'Room Alert: Engaging tech startup comedy!',
   },
 ];
