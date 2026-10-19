@@ -5,6 +5,7 @@ import {
   View,
   Pressable,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import {
   TVFocusGuideView,
@@ -33,10 +34,13 @@ export const VideoPlayerView = ({
   onClose,
   onRoomRecap,
 }: VideoPlayerViewProps) => {
+  const {width: deviceWidth, height: deviceHeight} = Dimensions.get('window');
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [currentTimeSec, setCurrentTimeSec] = useState<number>(0);
   const [durationSec, setDurationSec] = useState<number>(
-    item?.durationSec && item.durationSec > 0 ? Math.min(item.durationSec, 30) : 10,
+    item?.durationSec && item.durationSec > 0 && item.durationSec <= 300
+      ? item.durationSec
+      : 10,
   );
   const [isVideoLoading, setIsVideoLoading] = useState<boolean>(true);
   const [focusedControl, setFocusedControl] = useState<
@@ -48,7 +52,36 @@ export const VideoPlayerView = ({
   const isPlayingRef = useRef<boolean>(true);
   const {roomState} = useRoom();
 
-  // W3C VideoPlayer lifecycle management
+  // Surface view callbacks from KeplerVideoSurfaceView
+  const onSurfaceViewCreated = useCallback((handle: string) => {
+    console.info('[LivingFrame Video] onSurfaceViewCreated handle:', handle);
+    surfaceHandleRef.current = handle;
+    if (videoPlayerRef.current) {
+      console.info('[LivingFrame Video] Attaching surface handle to active player:', handle);
+      (videoPlayerRef.current as any).surfaceHandle = handle;
+      videoPlayerRef.current.setSurfaceHandle(handle);
+      if (isPlayingRef.current) {
+        console.info('[LivingFrame Video] Calling play on surface created');
+        videoPlayerRef.current.play().catch((err) => {
+          console.warn('[LivingFrame Video] play on surface created notice:', err);
+        });
+      }
+    }
+  }, []);
+
+  const onSurfaceViewDestroyed = useCallback((handle: string) => {
+    console.info('[LivingFrame Video] onSurfaceViewDestroyed handle:', handle);
+    if (videoPlayerRef.current) {
+      try {
+        videoPlayerRef.current.clearSurfaceHandle(handle);
+      } catch (e) {
+        // ignore
+      }
+    }
+    surfaceHandleRef.current = null;
+  }, []);
+
+  // W3C VideoPlayer lifecycle management matching official Amazon Vega architecture
   useEffect(() => {
     if (!visible || !item?.videoUrl) {
       return;
@@ -63,49 +96,100 @@ export const VideoPlayerView = ({
     const player = new VideoPlayer();
     videoPlayerRef.current = player;
 
+    // Emulator compatibility: The x86_64 Vega VM has no PulseAudio daemon / physical audio HAL.
+    // Audio muting must be configured prior to initialize() so W3CMediaTurboModule.muteAudio
+    // is registered during native initialization, preventing GStreamer clock lockup.
+    player.defaultMuted = true;
+    player.muted = true;
+    player.volume = 0;
+
+    if (surfaceHandleRef.current) {
+      (player as any).surfaceHandle = surfaceHandleRef.current;
+    }
+
     player
       .initialize()
       .then(() => {
         if (!isMounted) {
           return;
         }
-        console.log('[LivingFrame Video] VideoPlayer initialized for:', item.videoUrl);
+        console.info('[LivingFrame Video] VideoPlayer initialized successfully for:', item.videoUrl);
 
         player.addEventListener('loadedmetadata', () => {
-          if (!isMounted) return;
-          console.log('[LivingFrame Video] loadedmetadata duration:', player.duration);
+          if (!isMounted) {
+            return;
+          }
+          console.info('[LivingFrame Video] loadedmetadata duration:', player.duration);
           if (player.duration && !isNaN(player.duration) && player.duration > 0) {
             setDurationSec(Math.round(player.duration));
           }
           setIsVideoLoading(false);
         });
 
+        player.addEventListener('loadeddata', () => {
+          if (!isMounted) {
+            return;
+          }
+          console.info('[LivingFrame Video] loadeddata');
+          setIsVideoLoading(false);
+        });
+
+        player.addEventListener('canplay', () => {
+          if (!isMounted) {
+            return;
+          }
+          console.info('[LivingFrame Video] canplay');
+          setIsVideoLoading(false);
+        });
+
         player.addEventListener('timeupdate', () => {
-          if (!isMounted) return;
+          if (!isMounted) {
+            return;
+          }
           if (player.currentTime != null && !isNaN(player.currentTime)) {
             setCurrentTimeSec(Math.floor(player.currentTime));
           }
+          if (player.duration && !isNaN(player.duration) && player.duration > 0) {
+            setDurationSec(Math.round(player.duration));
+          }
+          setIsVideoLoading(false);
         });
 
         player.addEventListener('playing', () => {
-          if (!isMounted) return;
+          if (!isMounted) {
+            return;
+          }
+          console.info('[LivingFrame Video] playing event received');
           setIsPlaying(true);
           isPlayingRef.current = true;
           setIsVideoLoading(false);
         });
 
         player.addEventListener('pause', () => {
-          if (!isMounted) return;
+          if (!isMounted) {
+            return;
+          }
+          console.info('[LivingFrame Video] pause event received');
           setIsPlaying(false);
           isPlayingRef.current = false;
         });
 
+        player.addEventListener('waiting', () => {
+          if (!isMounted) {
+            return;
+          }
+          console.info('[LivingFrame Video] waiting event (buffering)');
+          setIsVideoLoading(true);
+        });
+
         player.addEventListener('ended', () => {
-          if (!isMounted) return;
-          console.log('[LivingFrame Video] video playback ended, restarting loop');
+          if (!isMounted) {
+            return;
+          }
+          console.info('[LivingFrame Video] video playback ended, restarting loop');
           try {
             player.currentTime = 0;
-            player.play();
+            player.play().catch(console.warn);
           } catch (e) {
             console.warn('[LivingFrame Video] loop restart notice:', e);
           }
@@ -119,18 +203,25 @@ export const VideoPlayerView = ({
           setIsVideoLoading(false);
         });
 
-        // Set media URL and load stream
-        player.src = item.videoUrl || '';
-        player.autoplay = false;
-        player.load();
-
-        // If surface handle was already created, bind it and start playback
+        // If surface handle was already created during initialization, attach BEFORE setting src
         if (surfaceHandleRef.current) {
+          console.info('[LivingFrame Video] Attaching pre-created surface handle before src:', surfaceHandleRef.current);
           player.setSurfaceHandle(surfaceHandleRef.current);
-          player.play().catch((err) => {
-            console.warn('[LivingFrame Video] auto play rejected:', err);
-          });
         }
+
+        // Set media URL and enable native autoplay directly
+        const localUrl = item.id ? `http://10.0.2.2:8080/videos/${item.id}.mp4` : null;
+        const targetSrc = localUrl || item.videoUrl || '';
+        console.info('[LivingFrame Video] Setting player.src to:', targetSrc);
+        player.autoplay = true;
+        player.loop = true;
+        player.muted = true;
+        player.defaultMuted = true;
+        player.src = targetSrc;
+
+        player.play().catch((err) => {
+          console.warn('[LivingFrame Video] play on init notice:', err);
+        });
       })
       .catch((err) => {
         console.error('[LivingFrame Video] VideoPlayer.initialize error:', err);
@@ -149,7 +240,12 @@ export const VideoPlayerView = ({
         }
         try {
           videoPlayerRef.current.pause();
-          videoPlayerRef.current.deinitialize();
+          const p = videoPlayerRef.current as any;
+          if (typeof p.deinitializeSync === 'function') {
+            p.deinitializeSync(1000);
+          } else {
+            videoPlayerRef.current.deinitialize();
+          }
         } catch (e) {
           // ignore
         }
@@ -157,33 +253,7 @@ export const VideoPlayerView = ({
       }
       surfaceHandleRef.current = null;
     };
-  }, [visible, item?.videoUrl]);
-
-  // Surface view callbacks from KeplerVideoSurfaceView
-  const onSurfaceViewCreated = useCallback((handle: string) => {
-    console.log('[LivingFrame Video] onSurfaceViewCreated handle:', handle);
-    surfaceHandleRef.current = handle;
-    if (videoPlayerRef.current) {
-      videoPlayerRef.current.setSurfaceHandle(handle);
-      if (isPlayingRef.current) {
-        videoPlayerRef.current.play().catch((err) => {
-          console.warn('[LivingFrame Video] play on surface created notice:', err);
-        });
-      }
-    }
-  }, []);
-
-  const onSurfaceViewDestroyed = useCallback((handle: string) => {
-    console.log('[LivingFrame Video] onSurfaceViewDestroyed handle:', handle);
-    if (videoPlayerRef.current) {
-      try {
-        videoPlayerRef.current.clearSurfaceHandle(handle);
-      } catch (e) {
-        // ignore
-      }
-    }
-    surfaceHandleRef.current = null;
-  }, []);
+  }, [visible, item?.id, item?.videoUrl]);
 
   // Playback control functions
   const handlePlay = useCallback(() => {
@@ -199,6 +269,10 @@ export const VideoPlayerView = ({
   }, []);
 
   const handlePause = useCallback(() => {
+    if (isVideoLoading) {
+      console.info('[LivingFrame Video] Ignoring pause while video is loading');
+      return;
+    }
     if (videoPlayerRef.current) {
       try {
         videoPlayerRef.current.pause();
@@ -208,15 +282,19 @@ export const VideoPlayerView = ({
     }
     setIsPlaying(false);
     isPlayingRef.current = false;
-  }, []);
+  }, [isVideoLoading]);
 
   const handleTogglePlay = useCallback(() => {
+    if (isVideoLoading) {
+      console.info('[LivingFrame Video] Ignoring toggle while video is loading');
+      return;
+    }
     if (isPlaying) {
       handlePause();
     } else {
       handlePlay();
     }
-  }, [isPlaying, handlePause, handlePlay]);
+  }, [isPlaying, isVideoLoading, handlePause, handlePlay]);
 
   const handleRestart = useCallback(() => {
     if (videoPlayerRef.current) {
@@ -277,9 +355,22 @@ export const VideoPlayerView = ({
   return (
     <View style={styles.playerContainer} testID="livingframe-videoplayer-view">
       {/* 1. Hardware Accelerated Native Video Surface rendered by Vega Media Engine */}
-      <View style={styles.surfaceWrapper}>
+      <View
+        style={[
+          styles.surfaceWrapper,
+          {
+            width: deviceWidth,
+            height: deviceHeight,
+          },
+        ]}>
         <KeplerVideoSurfaceView
-          style={styles.surfaceView}
+          style={[
+            styles.surfaceView,
+            {
+              width: deviceWidth,
+              height: deviceHeight,
+            },
+          ]}
           scalingmode="fit"
           onSurfaceViewCreated={onSurfaceViewCreated}
           onSurfaceViewDestroyed={onSurfaceViewDestroyed}
@@ -408,7 +499,6 @@ export const VideoPlayerView = ({
             ]}
             onFocus={() => setFocusedControl('play')}
             onPress={handleTogglePlay}
-            hasTVPreferredFocus={true}
             accessibilityRole="button"
             accessibilityLabel={isPlaying ? 'Pause video' : 'Play video'}
             testID="btn-player-toggle">
@@ -453,19 +543,26 @@ export const VideoPlayerView = ({
 const styles = StyleSheet.create({
   playerContainer: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: 'transparent',
     position: 'relative',
     justifyContent: 'space-between',
     zIndex: 100,
   },
   surfaceWrapper: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#000000',
-    zIndex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 0,
   },
   surfaceView: {
     width: '100%',
     height: '100%',
+    zIndex: 0,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,

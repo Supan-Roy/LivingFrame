@@ -18,6 +18,8 @@
 const http = require('http');
 const WebSocket = require('ws');
 const os = require('os');
+const fs = require('fs');
+const path = require('path');
 
 // Parse CLI arguments or environment variables
 const args = process.argv.slice(2);
@@ -436,6 +438,52 @@ const server = http.createServer((req, res) => {
       clientsNotified: count,
       event: payload,
     }));
+    return;
+  }
+
+  // Video streaming endpoint with Range request support (HTTP 206)
+  if (url.startsWith('/videos/')) {
+    const rawName = url.split('?')[0].replace('/videos/', '');
+    const safeName = path.basename(rawName);
+    const filePath = path.join(__dirname, '../public/videos', safeName);
+
+    if (!fs.existsSync(filePath)) {
+      console.warn(`[HTTP Video 404] ${safeName} not found`);
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Video Not Found: ' + safeName);
+      return;
+    }
+
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+    console.log(`[HTTP Video Stream] ${req.method} ${safeName} range=${range || 'none'} size=${fileSize}`);
+
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunksize = end - start + 1;
+      const file = fs.createReadStream(filePath, { start, end });
+      const head = {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunksize,
+        'Content-Type': 'video/mp4',
+        'Access-Control-Allow-Origin': '*',
+      };
+      res.writeHead(206, head);
+      file.pipe(res);
+    } else {
+      const head = {
+        'Content-Length': fileSize,
+        'Accept-Ranges': 'bytes',
+        'Content-Type': 'video/mp4',
+        'Access-Control-Allow-Origin': '*',
+      };
+      res.writeHead(200, head);
+      fs.createReadStream(filePath).pipe(res);
+    }
     return;
   }
 

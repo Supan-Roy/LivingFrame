@@ -131,7 +131,7 @@ export const LivingFrameHome = () => {
   };
 
   const handleCardSelect = (item: MediaItem) => {
-    setDetailsModalItem(item);
+    setPlayingItem(item);
   };
 
   const handleExplore = (item: MediaItem) => {

@@ -13,6 +13,7 @@ jest.mock('@amazon-devices/react-native-w3cmedia', () => {
     VideoPlayer: class MockVideoPlayer {
       initialize = jest.fn().mockResolvedValue(undefined);
       deinitialize = jest.fn().mockResolvedValue(undefined);
+      deinitializeSync = jest.fn().mockReturnValue('success');
       setSurfaceHandle = jest.fn();
       clearSurfaceHandle = jest.fn();
       play = jest.fn().mockResolvedValue(undefined);
@@ -24,6 +25,10 @@ jest.mock('@amazon-devices/react-native-w3cmedia', () => {
       duration = 10;
       src = '';
       autoplay = false;
+      loop = false;
+      muted = false;
+      defaultMuted = false;
+      volume = 1;
     },
     KeplerVideoSurfaceView: (props: any) =>
       ReactModule.createElement(View, {

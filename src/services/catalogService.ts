@@ -139,8 +139,9 @@ export class CatalogService {
           durationSec: getRealisticDuration(item),
           trending: item.trending ?? false,
           videoUrl:
-            videoSource?.url ||
-            `https://giolaq.github.io/scrap-tv-feed/content/${item.id}/movie_1080p.mp4`,
+            videoSource?.url && videoSource.url.startsWith('http://10.0.2.2')
+              ? videoSource.url
+              : `http://10.0.2.2:8080/videos/${item.id}.mp4`,
           aiContextHint: 'Room Presence Active',
         };
       });
