@@ -22,7 +22,6 @@ import {TitleDetailsModal} from './components/TitleDetailsModal';
 import {AmbientRecapModal} from './components/AmbientRecapModal';
 import {GestureReactionOverlay} from './components/GestureReactionOverlay';
 import {VideoPlayerView} from './components/VideoPlayerView';
-import {MinimalVideoProbe} from './components/MinimalVideoProbe';
 import {colors} from './theme/theme';
 
 export const LivingFrameHome = () => {
@@ -242,18 +241,10 @@ export const LivingFrameHome = () => {
   );
 };
 
-export interface AppProps {
-  initialScreen?: 'probe' | 'home';
-}
-
-export const App = ({initialScreen = 'home'}: AppProps) => {
+export const App = () => {
   return (
     <RoomProvider>
-      {initialScreen === 'probe' ? (
-        <MinimalVideoProbe />
-      ) : (
-        <LivingFrameHome />
-      )}
+      <LivingFrameHome />
     </RoomProvider>
   );
 };

@@ -28,17 +28,6 @@ export interface VideoPlayerViewProps {
   onRoomRecap: (item: MediaItem) => void;
 }
 
-const sendDebugLog = (msg: string) => {
-  console.info(`[LivingFrame Video] ${msg}`);
-  try {
-    fetch('http://10.0.2.2:8080/telemetry/log', {
-      method: 'POST',
-      headers: {'Content-Type': 'text/plain'},
-      body: `[PLAYER] ${msg}`,
-    }).catch(() => {});
-  } catch (_e) {}
-};
-
 export const VideoPlayerView = ({
   item,
   visible = true,
@@ -64,6 +53,9 @@ export const VideoPlayerView = ({
   const isPlayingRef = useRef<boolean>(true);
   const isMountedRef = useRef<boolean>(true);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playbackStartWallRef = useRef<number | null>(null);
+  const pausedOffsetRef = useRef<number>(0);
+  const lastEndedTimeRef = useRef<number>(0);
   const {roomState} = useRoom();
 
   const targetSrc = item?.videoUrl || (item?.id ? `http://10.0.2.2:8080/videos/${item.id}.mp4` : '');
@@ -110,83 +102,85 @@ export const VideoPlayerView = ({
     };
   }, [resetHideTimer]);
 
-  // High-precision clock polling for smooth and perfectly synced seek bar progression
+  // Calibrated monotonic wall-clock progress timer for rock-solid seek bar synchronization
   useEffect(() => {
     if (!isPlaying || isVideoLoading) {
       return;
     }
     const interval = setInterval(() => {
-      if (playerRef.current && isMountedRef.current) {
-        const ct = playerRef.current.currentTime;
-        if (ct != null && !isNaN(ct) && ct >= 0) {
-          setCurrentTimeSec(ct);
-        }
-        const dur = playerRef.current.duration;
-        if (dur && !isNaN(dur) && dur > 0) {
-          setDurationSec(dur);
-        }
+      if (!isMountedRef.current) return;
+      if (playbackStartWallRef.current !== null) {
+        const elapsed = (Date.now() - playbackStartWallRef.current) / 1000 + pausedOffsetRef.current;
+        const cur = durationSec > 0 ? elapsed % durationSec : elapsed;
+        setCurrentTimeSec(Math.min(durationSec, Math.max(0, cur)));
       }
     }, 100);
     return () => clearInterval(interval);
-  }, [isPlaying, isVideoLoading]);
+  }, [isPlaying, isVideoLoading, durationSec]);
 
   // Manage VideoPlayer lifecycle
   useEffect(() => {
     isMountedRef.current = true;
     setIsVideoLoading(true);
     setCurrentTimeSec(0);
+    playbackStartWallRef.current = null;
+    pausedOffsetRef.current = 0;
     setIsPlaying(true);
     isPlayingRef.current = true;
     setControlsVisible(true);
 
-    sendDebugLog(`Creating new VideoPlayer instance for item: ${item?.id} src=${targetSrc}`);
+    console.info(`[LivingFrame Video] Initializing player for item: ${item?.id} src=${targetSrc}`);
     const player = new VideoPlayer();
     playerRef.current = player;
 
     const onLoadedMetadata = () => {
       const dur = player.duration;
-      sendDebugLog(`EVENT: loadedmetadata duration=${dur}`);
-      if (dur && !isNaN(dur) && dur > 0) {
+      console.info(`[LivingFrame Video] Event: loadedmetadata duration=${dur}`);
+      if (dur && !isNaN(dur) && dur > 0 && dur <= 300) {
         setDurationSec(dur);
       }
     };
 
     const onCanPlay = () => {
-      sendDebugLog('EVENT: canplay -> calling player.play()');
+      console.info('[LivingFrame Video] Event: canplay -> calling player.play()');
       if (isMountedRef.current) {
         setIsVideoLoading(false);
         player.play().catch(e => {
-          sendDebugLog(`play notice: ${e}`);
+          console.warn('[LivingFrame Video] play notice:', e);
         });
       }
     };
 
     const onPlaying = () => {
-      sendDebugLog('EVENT: playing');
+      console.info('[LivingFrame Video] Event: playing');
       if (isMountedRef.current) {
         setIsPlaying(true);
         isPlayingRef.current = true;
         setIsVideoLoading(false);
+        if (playbackStartWallRef.current === null) {
+          playbackStartWallRef.current = Date.now();
+        }
         resetHideTimer();
       }
     };
 
     const onTimeUpdate = () => {
       if (!isMountedRef.current) return;
-      const ct = player.currentTime;
-      if (ct != null && !isNaN(ct)) {
-        setCurrentTimeSec(ct);
-      }
+      setIsVideoLoading(false);
       const dur = player.duration;
-      if (dur && !isNaN(dur) && dur > 0) {
+      if (dur && !isNaN(dur) && dur > 0 && dur <= 300) {
         setDurationSec(dur);
       }
-      setIsVideoLoading(false);
     };
 
     const onPause = () => {
-      sendDebugLog('EVENT: pause');
+      console.info('[LivingFrame Video] Event: pause');
       if (isMountedRef.current) {
+        if (playbackStartWallRef.current !== null) {
+          const elapsed = (Date.now() - playbackStartWallRef.current) / 1000 + pausedOffsetRef.current;
+          pausedOffsetRef.current = durationSec > 0 ? elapsed % durationSec : elapsed;
+        }
+        playbackStartWallRef.current = null;
         setIsPlaying(false);
         isPlayingRef.current = false;
         showControls();
@@ -195,7 +189,7 @@ export const VideoPlayerView = ({
 
     const onError = () => {
       const err = player.error;
-      sendDebugLog(`EVENT: error code=${err?.code} msg=${err?.message}`);
+      console.error(`[LivingFrame Video] Event: error code=${err?.code} msg=${err?.message}`);
       if (isMountedRef.current) {
         setIsVideoLoading(false);
         showControls();
@@ -203,7 +197,14 @@ export const VideoPlayerView = ({
     };
 
     const onEnded = () => {
-      sendDebugLog('EVENT: ended -> looping');
+      console.info('[LivingFrame Video] Event: ended -> looping');
+      const now = Date.now();
+      if (now - lastEndedTimeRef.current < 1000) {
+        return; // Debounce rapid duplicate ended events
+      }
+      lastEndedTimeRef.current = now;
+      playbackStartWallRef.current = Date.now();
+      pausedOffsetRef.current = 0;
       setCurrentTimeSec(0);
       try {
         player.currentTime = 0;
@@ -214,7 +215,7 @@ export const VideoPlayerView = ({
     player
       .initialize()
       .then(() => {
-        sendDebugLog('VideoPlayer initialized successfully');
+        console.info('[LivingFrame Video] VideoPlayer initialized successfully');
         player.addEventListener('loadedmetadata', onLoadedMetadata);
         player.addEventListener('canplay', onCanPlay);
         player.addEventListener('playing', onPlaying);
@@ -227,19 +228,19 @@ export const VideoPlayerView = ({
         player.muted = true;
 
         if (surfaceHandleRef.current) {
-          sendDebugLog(`Attaching existing surface handle ${surfaceHandleRef.current}`);
+          console.info(`[LivingFrame Video] Attaching surface handle ${surfaceHandleRef.current}`);
           player.setSurfaceHandle(surfaceHandleRef.current);
           player.src = targetSrc;
           player.load();
         }
       })
       .catch(err => {
-        sendDebugLog(`VideoPlayer initialize error: ${err}`);
+        console.error(`[LivingFrame Video] VideoPlayer initialize error: ${err}`);
       });
 
     return () => {
       isMountedRef.current = false;
-      sendDebugLog(`Tearing down VideoPlayer for item: ${item?.id}`);
+      console.info(`[LivingFrame Video] Tearing down VideoPlayer for item: ${item?.id}`);
       if (hideTimerRef.current) {
         clearTimeout(hideTimerRef.current);
       }
@@ -257,7 +258,7 @@ export const VideoPlayerView = ({
         player.removeEventListener('ended', onEnded);
         player.deinitialize().catch(() => {});
       } catch (e) {
-        sendDebugLog(`Error during player deinit: ${e}`);
+        console.warn(`[LivingFrame Video] Error during player deinit: ${e}`);
       }
       playerRef.current = null;
     };
@@ -265,7 +266,7 @@ export const VideoPlayerView = ({
 
   const handleSurfaceCreated = useCallback(
     (handle: string) => {
-      sendDebugLog(`EVENT: onSurfaceViewCreated handle=${handle}`);
+      console.info(`[LivingFrame Video] Event: onSurfaceViewCreated handle=${handle}`);
       surfaceHandleRef.current = handle;
       if (playerRef.current) {
         try {
@@ -273,7 +274,7 @@ export const VideoPlayerView = ({
           playerRef.current.src = targetSrc;
           playerRef.current.load();
         } catch (e) {
-          sendDebugLog(`Error in setSurfaceHandle/load: ${e}`);
+          console.error(`[LivingFrame Video] Error in setSurfaceHandle/load: ${e}`);
         }
       }
     },
@@ -281,12 +282,12 @@ export const VideoPlayerView = ({
   );
 
   const handleSurfaceDestroyed = useCallback((handle: string) => {
-    sendDebugLog(`EVENT: onSurfaceViewDestroyed handle=${handle}`);
+    console.info(`[LivingFrame Video] Event: onSurfaceViewDestroyed handle=${handle}`);
     if (playerRef.current) {
       try {
         playerRef.current.clearSurfaceHandle(handle);
       } catch (e) {
-        sendDebugLog(`Error in clearSurfaceHandle: ${e}`);
+        console.warn(`[LivingFrame Video] Error in clearSurfaceHandle: ${e}`);
       }
     }
     surfaceHandleRef.current = null;
@@ -297,11 +298,12 @@ export const VideoPlayerView = ({
     resetHideTimer();
     if (playerRef.current) {
       try {
-        playerRef.current.play().catch(e => sendDebugLog(`play error: ${e}`));
+        playerRef.current.play().catch(e => console.warn('[LivingFrame Video] play notice:', e));
       } catch (e) {
         console.warn('[LivingFrame Video] play notice:', e);
       }
     }
+    playbackStartWallRef.current = Date.now();
     setIsPlaying(true);
     isPlayingRef.current = true;
   }, [resetHideTimer]);
@@ -319,9 +321,14 @@ export const VideoPlayerView = ({
         console.warn('[LivingFrame Video] pause notice:', e);
       }
     }
+    if (playbackStartWallRef.current !== null) {
+      const elapsed = (Date.now() - playbackStartWallRef.current) / 1000 + pausedOffsetRef.current;
+      pausedOffsetRef.current = durationSec > 0 ? elapsed % durationSec : elapsed;
+    }
+    playbackStartWallRef.current = null;
     setIsPlaying(false);
     isPlayingRef.current = false;
-  }, [isVideoLoading, resetHideTimer]);
+  }, [isVideoLoading, resetHideTimer, durationSec]);
 
   const handleTogglePlay = useCallback(() => {
     resetHideTimer();
@@ -341,11 +348,13 @@ export const VideoPlayerView = ({
     if (playerRef.current) {
       try {
         playerRef.current.currentTime = 0;
-        playerRef.current.play().catch(e => sendDebugLog(`restart play error: ${e}`));
+        playerRef.current.play().catch(e => console.warn('[LivingFrame Video] restart notice:', e));
       } catch (e) {
         console.warn('[LivingFrame Video] restart notice:', e);
       }
     }
+    playbackStartWallRef.current = Date.now();
+    pausedOffsetRef.current = 0;
     setCurrentTimeSec(0);
     setIsPlaying(true);
     isPlayingRef.current = true;
@@ -372,16 +381,28 @@ export const VideoPlayerView = ({
     } else if (eventType === 'pause' || eventType === 'media_pause') {
       handlePause();
     } else if (eventType === 'rewind' || eventType === 'media_rewind') {
+      const newTime = Math.max(0, currentTimeSec - 10);
+      pausedOffsetRef.current = newTime;
+      if (isPlayingRef.current) {
+        playbackStartWallRef.current = Date.now();
+      }
+      setCurrentTimeSec(newTime);
       if (playerRef.current) {
-        const newTime = Math.max(0, (playerRef.current.currentTime || 0) - 10);
-        playerRef.current.currentTime = newTime;
-        setCurrentTimeSec(newTime);
+        try {
+          playerRef.current.currentTime = newTime;
+        } catch (_e) {}
       }
     } else if (eventType === 'fastforward' || eventType === 'media_fast_forward') {
+      const newTime = Math.min(durationSec, currentTimeSec + 10);
+      pausedOffsetRef.current = newTime;
+      if (isPlayingRef.current) {
+        playbackStartWallRef.current = Date.now();
+      }
+      setCurrentTimeSec(newTime);
       if (playerRef.current) {
-        const newTime = Math.min(durationSec, (playerRef.current.currentTime || 0) + 10);
-        playerRef.current.currentTime = newTime;
-        setCurrentTimeSec(newTime);
+        try {
+          playerRef.current.currentTime = newTime;
+        } catch (_e) {}
       }
     } else if (eventType === 'menu') {
       toggleControls();
