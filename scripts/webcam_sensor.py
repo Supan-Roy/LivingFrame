@@ -80,12 +80,15 @@ GESTURE_MAP = {
     'Victory': ('victory', 'Victory Detected', '✌️'),
 }
 
-# Horizontal swipe gesture tuning (normalized frame coordinates, 0..1)
-SWIPE_WINDOW_SEC = 0.55       # Time window over which motion is measured
-SWIPE_MIN_FRAMES = 3          # Minimum tracked samples before a swipe can fire
-SWIPE_DX_THRESHOLD = 0.22     # Minimum horizontal travel (fraction of frame width)
-SWIPE_DOMINANCE_RATIO = 1.5   # Horizontal motion must exceed vertical by this factor
-SWIPE_COOLDOWN_SEC = 1.2      # Debounce between consecutive swipe dispatches
+# Horizontal swipe gesture tuning (normalized frame coordinates, 0..1).
+# Tuned to tolerate the intermittent hand detection of the per-frame (IMAGE) recognizer.
+SWIPE_WINDOW_SEC = 0.7        # Time window over which motion is measured
+SWIPE_MIN_SAMPLES = 2         # Minimum tracked samples before a swipe can fire
+SWIPE_MIN_TIME_SEC = 0.08     # Minimum sample time span needed to infer a direction
+SWIPE_DX_THRESHOLD = 0.12     # Minimum horizontal travel (fraction of frame width)
+SWIPE_DOMINANCE_RATIO = 1.4   # Horizontal motion must exceed vertical by this factor
+SWIPE_COOLDOWN_SEC = 0.7      # Debounce between consecutive swipe dispatches
+SWIPE_SUPPRESS_SEC = 0.7      # Suppress gesture toggles right after a swipe dispatch
 SWIPE_PALM_LANDMARK = 9       # Middle-finger MCP: stable palm-center proxy
 
 
@@ -154,12 +157,14 @@ class WebcamSensor:
         self.consecutive_hits = 0
         self.last_candidate_gesture = None
         self.neutral_frames = 0
-        self.cooldown_seconds = 3.0
-        self.min_consecutive_frames = 3
+        self.cooldown_seconds = 2.0
+        self.min_consecutive_frames = 2
 
         # Swipe (seek) tracking state
         self.swipe_history = deque(maxlen=40)
         self.last_swipe_time = 0.0
+        self.swipe_suppress_until = 0.0
+        self.swipe_debug = os.environ.get('LIVINGFRAME_SWIPE_DEBUG') == '1'
 
         # Heuristic parameters (for fallback mode)
         self.upper_zone_fraction = 0.35
@@ -220,32 +225,36 @@ class WebcamSensor:
             return False
 
     def _detect_swipe(self, results, now):
-        """Track horizontal palm motion and return 'swipe_left'/'swipe_right' when detected."""
-        if not results.hand_landmarks:
-            # No hand in frame: drop stale motion history
-            self.swipe_history.clear()
-            return None
+        """Track horizontal palm motion and return 'swipe_left'/'swipe_right' when detected.
 
-        palm = results.hand_landmarks[0][SWIPE_PALM_LANDMARK]
-        self.swipe_history.append((now, palm.x, palm.y))
+        Tolerant of transient hand-detection dropouts: samples are only aged out by the
+        time window, never cleared on a single missed frame (the per-frame recognizer
+        drops the hand often while it is moving, which previously discarded the motion).
+        """
+        if results.hand_landmarks:
+            palm = results.hand_landmarks[0][SWIPE_PALM_LANDMARK]
+            self.swipe_history.append((now, palm.x, palm.y))
 
-        # Retain only samples inside the measurement window
+        # Age out samples outside the measurement window
         while self.swipe_history and (now - self.swipe_history[0][0]) > SWIPE_WINDOW_SEC:
             self.swipe_history.popleft()
 
-        if len(self.swipe_history) < SWIPE_MIN_FRAMES:
-            return None
-        if (now - self.last_swipe_time) < SWIPE_COOLDOWN_SEC:
+        if len(self.swipe_history) < SWIPE_MIN_SAMPLES:
             return None
 
         start_t, start_x, start_y = self.swipe_history[0]
-        span = now - start_t
-        if span <= 0:
+        end_t, end_x, end_y = self.swipe_history[-1]
+        span = end_t - start_t
+        dx = end_x - start_x
+        dy = end_y - start_y
+
+        if self.swipe_debug and abs(dx) >= SWIPE_DX_THRESHOLD * 0.5:
+            print(f"[SWIPE DEBUG] samples={len(self.swipe_history)} span={span:.2f}s dx={dx:+.2f} dy={dy:+.2f}")
+
+        if span < SWIPE_MIN_TIME_SEC:
             return None
-
-        dx = palm.x - start_x
-        dy = palm.y - start_y
-
+        if (now - self.last_swipe_time) < SWIPE_COOLDOWN_SEC:
+            return None
         if abs(dx) >= SWIPE_DX_THRESHOLD and abs(dx) > abs(dy) * SWIPE_DOMINANCE_RATIO:
             self.last_swipe_time = now
             self.swipe_history.clear()
@@ -682,6 +691,8 @@ class WebcamSensor:
                         handedness=detected_hand,
                         message=f"{swipe_emoji} {swipe_desc}"
                     )
+                    # Don't also emit a hand-raise/gesture toggle from the swipe motion
+                    self.swipe_suppress_until = now + SWIPE_SUPPRESS_SEC
 
                 # Gesture mapping and event debouncing
                 mapped_gesture, gesture_desc, gesture_emoji = None, None, None
@@ -690,7 +701,7 @@ class WebcamSensor:
 
                 time_since_trigger = now - self.last_trigger_time
 
-                if mapped_gesture and detected_score >= self.min_confidence:
+                if mapped_gesture and detected_score >= self.min_confidence and now >= self.swipe_suppress_until:
                     self.neutral_frames = 0
                     if self.last_candidate_gesture == mapped_gesture:
                         self.consecutive_hits += 1
@@ -767,7 +778,7 @@ def main():
     parser = argparse.ArgumentParser(description='LivingFrame Laptop Webcam Room Sensor')
     parser.add_argument('--engine', choices=['mediapipe', 'heuristic'], default='mediapipe', help='Gesture detection engine (default: mediapipe)')
     parser.add_argument('--model', default=DEFAULT_MODEL, help='Path to MediaPipe gesture_recognizer.task model')
-    parser.add_argument('--confidence', type=float, default=0.65, help='Minimum confidence threshold for ML gesture detection (default: 0.65)')
+    parser.add_argument('--confidence', type=float, default=0.55, help='Minimum confidence threshold for ML gesture detection (default: 0.55)')
     parser.add_argument('--device', default=DEFAULT_DEVICE, help='V4L2 camera device (default: /dev/video0)')
     parser.add_argument('--server', default=DEFAULT_SERVER, help='WebSocket/HTTP server URL (default: http://localhost:8080)')
     parser.add_argument('--manual', action='store_true', help='Run in manual keypress trigger fallback mode')

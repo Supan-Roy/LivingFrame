@@ -1,5 +1,5 @@
 import 'react-native';
-import {render, act} from '@testing-library/react-native';
+import {render, act, fireEvent} from '@testing-library/react-native';
 import * as React from 'react';
 import {RoomProvider, useRoom} from '../src/context/RoomContext';
 import {VideoPlayerView} from '../src/components/VideoPlayerView';
@@ -86,11 +86,11 @@ describe('Gesture playback control', () => {
     jest.useRealTimers();
   });
 
-  const setup = async () => {
+  const setup = async (mediaItem: any = item) => {
     const screen = render(
       <RoomProvider>
         <VideoPlayerView
-          item={item}
+          item={mediaItem}
           visible={true}
           onClose={jest.fn()}
           onRoomRecap={jest.fn()}
@@ -111,7 +111,6 @@ describe('Gesture playback control', () => {
           payload: {gesture} as any,
         });
       }
-      jest.advanceTimersByTime(30);
     });
   };
 
@@ -129,11 +128,14 @@ describe('Gesture playback control', () => {
     expect(screen.getByTestId('btn-player-toggle').props.accessibilityLabel).toBe(
       'Play video',
     );
+    expect(screen.getByTestId('player-center-status')).toBeTruthy();
+    expect(screen.getByText('Pause')).toBeTruthy();
 
     fireGesture('hand_raised');
     expect(screen.getByTestId('btn-player-toggle').props.accessibilityLabel).toBe(
       'Pause video',
     );
+    expect(screen.getByText('Play')).toBeTruthy();
   });
 
   it('seeks forward and back 5s on swipe gestures', async () => {
@@ -147,5 +149,46 @@ describe('Gesture playback control', () => {
 
     fireGesture('swipe_left');
     expect(screen.getByText('00:00')).toBeTruthy();
+  });
+
+  it('seeks by 5s with clamping at 0 and at the clip duration', async () => {
+    const shortItem = {...fallbackMediaItems[0], durationSec: 10};
+    const screen = await setup(shortItem);
+    act(() => {
+      getPlayer().emit('loadeddata');
+      getPlayer().emit('playing');
+    });
+    const currentTime = () =>
+      screen.getByTestId('player-current-time').props.children;
+
+    // Advance playback to ~6 seconds
+    act(() => {
+      jest.advanceTimersByTime(6000);
+    });
+    // Controls auto-hid after 5s; press the backdrop to reveal them again
+    act(() => {
+      fireEvent.press(screen.getByTestId('btn-screen-toggle-controls'));
+    });
+    expect(currentTime()).toBe('00:06');
+
+    // 6s - 5s -> 1s (NOT 0)
+    fireGesture('swipe_left');
+    expect(currentTime()).toBe('00:01');
+
+    // 1s + 5s -> 6s
+    fireGesture('swipe_right');
+    expect(currentTime()).toBe('00:06');
+
+    // 6s + 5s -> clamped to the 10s clip length
+    fireGesture('swipe_right');
+    expect(currentTime()).toBe('00:10');
+
+    // Already at the end: forward stays clamped
+    fireGesture('swipe_right');
+    expect(currentTime()).toBe('00:10');
+
+    // 10s - 5s -> 5s
+    fireGesture('swipe_left');
+    expect(currentTime()).toBe('00:05');
   });
 });

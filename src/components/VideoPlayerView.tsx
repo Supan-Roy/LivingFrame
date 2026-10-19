@@ -68,6 +68,7 @@ export const VideoPlayerView = ({
   const playbackStartWallRef = useRef<number | null>(null);
   const pausedOffsetRef = useRef<number>(0);
   const lastEndedTimeRef = useRef<number>(0);
+  const seekGuardUntilRef = useRef<number>(0);
   const isInitializedRef = useRef<boolean>(false);
   const isLoadedRef = useRef<boolean>(false);
   const gestureFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -217,6 +218,11 @@ export const VideoPlayerView = ({
     };
 
     const onPause = () => {
+      // Ignore the transient pause the native player emits while seeking
+      if (Date.now() < seekGuardUntilRef.current) {
+        console.info('[LivingFrame Video] Event: pause (ignored during seek)');
+        return;
+      }
       console.info('[LivingFrame Video] Event: pause');
       if (isMountedRef.current) {
         if (playbackStartWallRef.current !== null) {
@@ -424,11 +430,17 @@ export const VideoPlayerView = ({
       pausedOffsetRef.current = target;
       if (isPlayingRef.current) {
         playbackStartWallRef.current = Date.now();
+        // Seeking can make the native player emit a transient 'pause'/stall; guard
+        // against it and re-assert playback so the picture does not freeze.
+        seekGuardUntilRef.current = Date.now() + 600;
       }
       setCurrentTimeSec(target);
       if (playerRef.current) {
         try {
           playerRef.current.currentTime = target;
+          if (isPlayingRef.current) {
+            playerRef.current.play().catch(() => {});
+          }
         } catch (e) {
           console.warn('[LivingFrame Video] Gesture seek notice:', e);
         }
@@ -454,15 +466,15 @@ export const VideoPlayerView = ({
         return;
       }
       handleTogglePlay();
-      showGestureFeedback(
-        isPlayingRef.current ? '⏸  Paused by gesture' : '▶  Playing by gesture',
-      );
+      // handleTogglePlay updates isPlayingRef synchronously, so this reflects the
+      // resulting state (previously it was inverted, showing the opposite word)
+      showGestureFeedback(isPlayingRef.current ? 'Play' : 'Pause');
     } else if (gesture === 'swipe_left') {
       seekRelative(-GESTURE_SEEK_STEP_SEC);
-      showGestureFeedback(`⏪  Rewind ${GESTURE_SEEK_STEP_SEC}s`);
+      showGestureFeedback('⏪  Rewind');
     } else if (gesture === 'swipe_right') {
       seekRelative(GESTURE_SEEK_STEP_SEC);
-      showGestureFeedback(`⏩  Forward ${GESTURE_SEEK_STEP_SEC}s`);
+      showGestureFeedback('⏩  Forward');
     }
   }, [
     roomState.lastEvent,
@@ -578,14 +590,14 @@ export const VideoPlayerView = ({
         </View>
       )}
 
-      {/* 3b. Transient gesture control confirmation HUD */}
-      {gestureFeedback && (
+      {/* 3b. Single centered play/pause (and gesture) status — middle of the screen only */}
+      {(gestureFeedback || (!isPlaying && controlsVisible)) && (
         <View
-          style={styles.gestureFeedbackWrapper}
+          style={styles.centerStatusOverlay}
           pointerEvents="none"
-          testID="gesture-feedback-toast">
-          <View style={styles.gestureFeedbackBadge}>
-            <Text style={styles.gestureFeedbackText}>{gestureFeedback}</Text>
+          testID="player-center-status">
+          <View style={styles.centerStatusBadge}>
+            <Text style={styles.centerStatusText}>{gestureFeedback ?? 'Pause'}</Text>
           </View>
         </View>
       )}
@@ -702,21 +714,13 @@ export const VideoPlayerView = ({
             </TVFocusGuideView>
           </View>
 
-          {/* Center Pause Watermark Indicator */}
-          {!isPlaying && (
-            <View style={styles.pausedIndicator} pointerEvents="none">
-              <View style={styles.pausedBadge}>
-                <Text style={styles.pausedIcon}>⏸</Text>
-                <Text style={styles.pausedText}>PAUSED</Text>
-              </View>
-            </View>
-          )}
+          {/* Center pause/play status is rendered once, above, in the middle of the screen */}
 
           {/* Bottom Cinema Playback Control Bar */}
           <View style={styles.bottomControls}>
             {/* Progress Bar & Real Time Stamps */}
             <View style={styles.progressRow}>
-              <Text style={styles.timeLabel}>
+              <Text style={styles.timeLabel} testID="player-current-time">
                 {formatTime(Math.min(durationSec, currentTimeSec))}
               </Text>
               <View style={styles.progressBarTrack}>
@@ -730,7 +734,9 @@ export const VideoPlayerView = ({
                   ]}
                 />
               </View>
-              <Text style={styles.timeLabel}>{formatTime(durationSec)}</Text>
+              <Text style={styles.timeLabel} testID="player-duration-time">
+                {formatTime(durationSec)}
+              </Text>
             </View>
 
             {/* Interactive TV Remote Control Buttons */}
@@ -836,27 +842,25 @@ const styles = StyleSheet.create({
     marginTop: 16,
     letterSpacing: 0.5,
   },
-  gestureFeedbackWrapper: {
-    position: 'absolute',
-    top: 120,
-    left: 0,
-    right: 0,
+  centerStatusOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 40,
+    zIndex: 30,
   },
-  gestureFeedbackBadge: {
-    backgroundColor: 'rgba(15, 23, 42, 0.92)',
-    paddingHorizontal: 26,
-    paddingVertical: 12,
-    borderRadius: 999,
+  centerStatusBadge: {
+    backgroundColor: 'rgba(3, 7, 18, 0.85)',
+    paddingHorizontal: 40,
+    paddingVertical: 20,
+    borderRadius: 16,
     borderWidth: 1.5,
-    borderColor: colors.accentGold,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
-  gestureFeedbackText: {
+  centerStatusText: {
     color: '#F8FAFC',
-    fontSize: 18,
+    fontSize: 30,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 2,
   },
   topVignette: {
     position: 'absolute',
@@ -1049,33 +1053,6 @@ const styles = StyleSheet.create({
   },
   visionToggleTextOn: {
     color: '#6EE7B7',
-  },
-  pausedIndicator: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 5,
-  },
-  pausedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(3, 7, 18, 0.85)',
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  pausedIcon: {
-    fontSize: 24,
-    color: '#F8FAFC',
-    marginRight: 12,
-  },
-  pausedText: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#F8FAFC',
-    letterSpacing: 2,
   },
   bottomControls: {
     position: 'absolute',

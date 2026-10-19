@@ -52,6 +52,7 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
   const gestureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const candidateIndexRef = useRef<number>(0);
   const isMountedRef = useRef<boolean>(true);
+  const eventSeqRef = useRef<number>(0);
 
   const connectToCandidate = useCallback((index: number) => {
     if (!isMountedRef.current) {
@@ -133,7 +134,7 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
               lastTestMessage: `✋ ${message}`,
               lastTestTimestamp: receivedTimestamp,
               lastEvent: {
-                id: `evt-${Date.now()}`,
+                id: `evt-${Date.now()}-${++eventSeqRef.current}`,
                 type: 'gesture_detected',
                 timestamp: receivedTimestamp,
                 payload: {
@@ -166,7 +167,7 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
               lastTestMessage: parsed.message || 'Connected to Laptop',
               lastTestTimestamp: receivedTimestamp,
               lastEvent: {
-                id: `evt-${Date.now()}`,
+                id: `evt-${Date.now()}-${++eventSeqRef.current}`,
                 type: 'connectivity_test',
                 timestamp: receivedTimestamp,
                 payload: {
@@ -188,7 +189,7 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
             setRoomState((prev) => ({
               ...prev,
               lastEvent: {
-                id: `evt-${Date.now()}`,
+                id: `evt-${Date.now()}-${++eventSeqRef.current}`,
                 type: 'play_video',
                 timestamp: receivedTimestamp,
                 payload: {
@@ -202,7 +203,7 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
               ...prev,
               viewersPresent: typeof count === 'number' ? count : prev.viewersPresent,
               lastEvent: {
-                id: `evt-${Date.now()}`,
+                id: `evt-${Date.now()}-${++eventSeqRef.current}`,
                 type: parsed.type,
                 timestamp: parsed.timestamp || Date.now(),
                 payload: parsed.payload || {},
@@ -307,7 +308,7 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
 
   const triggerMockEvent = (event: Partial<RoomEvent>) => {
     const fullEvent: RoomEvent = {
-      id: `evt-${Date.now()}`,
+      id: `evt-${Date.now()}-${++eventSeqRef.current}`,
       type: event.type || 'recap_requested',
       timestamp: Date.now(),
       payload: event.payload || {},
