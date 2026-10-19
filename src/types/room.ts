@@ -22,6 +22,8 @@ export type RoomGestureType =
   | 'victory'
   | 'swipe_left'
   | 'swipe_right'
+  | 'swipe_up'
+  | 'swipe_down'
   | 'none';
 
 export interface RoomEvent {

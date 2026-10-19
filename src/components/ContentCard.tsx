@@ -19,64 +19,72 @@ export interface ContentCardProps {
   hasTVPreferredFocus?: boolean;
 }
 
-export const ContentCard = ({
-  item,
-  isFocused,
-  onFocus,
-  onBlur,
-  onPress,
-  testID,
-  hasTVPreferredFocus,
-}: ContentCardProps) => {
-  return (
-    <Pressable
-      style={[
-        styles.cardContainer,
-        isFocused ? styles.cardContainerFocused : styles.cardContainerDefault,
-      ]}
-      onFocus={onFocus}
-      onBlur={onBlur}
-      onPress={onPress}
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={`${item.title}, ${item.category}, rated ${item.contentRating}`}
-      hasTVPreferredFocus={hasTVPreferredFocus}>
-      <View style={styles.imageWrapper}>
-        <Image
-          source={{uri: item.posterUrl}}
-          style={styles.posterImage}
-          resizeMode="cover"
-        />
-        {/* Subtle gradient dark bottom overlay for title contrast */}
-        <View style={styles.posterOverlay} />
+export const ContentCard = React.forwardRef<View, ContentCardProps>(
+  (
+    {
+      item,
+      isFocused,
+      onFocus,
+      onBlur,
+      onPress,
+      testID,
+      hasTVPreferredFocus,
+    },
+    ref,
+  ) => {
+    return (
+      <Pressable
+        ref={ref}
+        style={[
+          styles.cardContainer,
+          isFocused ? styles.cardContainerFocused : styles.cardContainerDefault,
+        ]}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        onPress={onPress}
+        testID={testID}
+        accessibilityRole="button"
+        accessibilityLabel={`${item.title}, ${item.category}, rated ${item.contentRating}`}
+        hasTVPreferredFocus={hasTVPreferredFocus}>
+        <View style={styles.imageWrapper}>
+          <Image
+            source={{uri: item.posterUrl}}
+            style={styles.posterImage}
+            resizeMode="cover"
+          />
+          {/* Subtle gradient dark bottom overlay for title contrast */}
+          <View style={styles.posterOverlay} />
 
-        {/* Trending or Content Rating Badge */}
-        {item.trending && (
-          <View style={styles.trendingBadge}>
-            <Text style={styles.trendingBadgeText}>★ TRENDING</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.metaContainer}>
-        <Text
-          numberOfLines={1}
-          style={[
-            styles.cardTitle,
-            isFocused ? styles.cardTitleFocused : styles.cardTitleDefault,
-          ]}>
-          {item.title}
-        </Text>
-        <View style={styles.subMetaRow}>
-          <Text style={styles.genreText}>
-            {item.genres.slice(0, 2).join(' • ')}
-          </Text>
-          <Text style={styles.yearText}>{item.releaseYear}</Text>
+          {/* Trending or Content Rating Badge */}
+          {item.trending && (
+            <View style={styles.trendingBadge}>
+              <Text style={styles.trendingBadgeText}>★ TRENDING</Text>
+            </View>
+          )}
         </View>
-      </View>
-    </Pressable>
-  );
-};
+
+        <View style={styles.metaContainer}>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.cardTitle,
+              isFocused ? styles.cardTitleFocused : styles.cardTitleDefault,
+            ]}>
+            {item.title}
+          </Text>
+          <View style={styles.subMetaRow}>
+            <Text style={styles.genreText}>
+              {item.genres.slice(0, 2).join(' • ')}
+            </Text>
+            <Text style={styles.yearText}>{item.releaseYear}</Text>
+          </View>
+        </View>
+      </Pressable>
+    );
+  },
+);
+
+ContentCard.displayName = 'ContentCard';
 
 const styles = StyleSheet.create({
   cardContainer: {

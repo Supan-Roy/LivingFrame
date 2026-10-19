@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useCallback} from 'react';
+import React, {useState, useEffect, useCallback, useMemo} from 'react';
 import {
   StyleSheet,
   View,
@@ -21,6 +21,10 @@ import {ContentRow} from './components/ContentRow';
 import {TitleDetailsModal} from './components/TitleDetailsModal';
 import {AmbientRecapModal} from './components/AmbientRecapModal';
 import {VideoPlayerView} from './components/VideoPlayerView';
+import {NavFocusProvider, useNavRegistry} from './navigation/NavFocusContext';
+import {useGestureNavigation} from './navigation/useGestureNavigation';
+import {HEADER_TOGGLE_ID, HERO_BUTTON_IDS} from './navigation/focusGrid';
+import type {NavCell, NavGrid} from './navigation/focusGrid';
 import {colors} from './theme/theme';
 
 export const LivingFrameHome = () => {
@@ -34,7 +38,8 @@ export const LivingFrameHome = () => {
   const [detailsModalItem, setDetailsModalItem] = useState<MediaItem | null>(null);
   const [recapModalItem, setRecapModalItem] = useState<MediaItem | null>(null);
   const [playingItem, setPlayingItem] = useState<MediaItem | null>(null);
-  const {roomState} = useRoom();
+  const {roomState, sendVisionCommand} = useRoom();
+  const nav = useNavRegistry();
 
   // Listen to remote play_video commands from telemetry server / gestures
   useEffect(() => {
@@ -134,106 +139,151 @@ export const LivingFrameHome = () => {
     };
   }, []);
 
-  const handleCardFocus = (item: MediaItem) => {
+  const handleCardFocus = useCallback((item: MediaItem) => {
     setFocusedItemId(item.id);
     setFeaturedItem(item);
-  };
+  }, []);
 
-  const handleCardSelect = (item: MediaItem) => {
+  const handleCardSelect = useCallback((item: MediaItem) => {
     setPlayingItem(item);
-  };
+  }, []);
 
-  const handleExplore = (item: MediaItem) => {
+  const handleExplore = useCallback((item: MediaItem) => {
     setPlayingItem(item);
-  };
+  }, []);
 
-  const handleMoreInfo = (item: MediaItem) => {
+  const handleMoreInfo = useCallback((item: MediaItem) => {
     setDetailsModalItem(item);
-  };
+  }, []);
 
-  const handleRoomRecap = (item: MediaItem) => {
+  const handleRoomRecap = useCallback((item: MediaItem) => {
     setRecapModalItem(item);
-  };
+  }, []);
 
   const currentScreen: 'browse' | 'player' = playingItem ? 'player' : 'browse';
 
+  // Focusable grid: row 0 = header gesture switch, row 1 = hero actions,
+  // rows 2..N = content rows. Ids match the components' registered refs.
+  const grid = useMemo<NavGrid>(() => {
+    const headerRow: NavCell[] = [
+      {
+        id: HEADER_TOGGLE_ID,
+        onActivate: () => sendVisionCommand(!roomState.visionEnabled),
+      },
+    ];
+    const heroRow: NavCell[] = [
+      {id: HERO_BUTTON_IDS[0], onActivate: () => handleExplore(featuredItem)},
+      {id: HERO_BUTTON_IDS[1], onActivate: () => handleMoreInfo(featuredItem)},
+      {id: HERO_BUTTON_IDS[2], onActivate: () => handleRoomRecap(featuredItem)},
+    ];
+    const contentRows: NavCell[][] = categories.map(category =>
+      category.items.map(item => ({
+        id: `card-${category.id}-${item.id}`,
+        onActivate: () => handleCardSelect(item),
+      })),
+    );
+    return [headerRow, heroRow, ...contentRows];
+  }, [
+    categories,
+    featuredItem,
+    roomState.visionEnabled,
+    sendVisionCommand,
+    handleExplore,
+    handleMoreInfo,
+    handleRoomRecap,
+    handleCardSelect,
+  ]);
+
+  useGestureNavigation({
+    grid,
+    cursor: nav.cursor,
+    refs: nav.refs,
+    enabled:
+      currentScreen === 'browse' && !detailsModalItem && !recapModalItem,
+  });
+
   return (
-    <View style={styles.container}>
-      {/* Browse Screen */}
-      {currentScreen === 'browse' && (
-        <ImageBackground
-          source={require('./assets/background.png')}
-          style={styles.container}>
-          {/* Top TV Header Bar with LivingFrame Wordmark */}
-          <Header />
+    <NavFocusProvider
+      registerRef={nav.registerRef}
+      reportFocus={nav.reportFocus}>
+      <View style={styles.container}>
+        {/* Browse Screen */}
+        {currentScreen === 'browse' && (
+          <ImageBackground
+            source={require('./assets/background.png')}
+            style={styles.container}>
+            {/* Top TV Header Bar with LivingFrame Wordmark & Gesture Switch */}
+            <Header />
 
-          {/* Main TV Vertical Content Flow */}
-          <ScrollView
-            style={styles.mainScroll}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.scrollContent}>
-            {/* Dynamic Hero Section */}
-            <HeroBanner
-              item={featuredItem}
-              onExplore={handleExplore}
-              onMoreInfo={handleMoreInfo}
-              onRoomRecap={handleRoomRecap}
-            />
-
-            {/* Content Rows */}
-            {categories.map((category, index) => (
-              <ContentRow
-                key={category.id}
-                category={category}
-                focusedItemId={focusedItemId}
-                onItemFocus={handleCardFocus}
-                onItemSelect={handleCardSelect}
-                isFirstRow={index === 0}
+            {/* Main TV Vertical Content Flow */}
+            <ScrollView
+              style={styles.mainScroll}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.scrollContent}>
+              {/* Dynamic Hero Section */}
+              <HeroBanner
+                item={featuredItem}
+                onExplore={handleExplore}
+                onMoreInfo={handleMoreInfo}
+                onRoomRecap={handleRoomRecap}
               />
-            ))}
-          </ScrollView>
-        </ImageBackground>
-      )}
 
-      {/* Video Player Screen */}
-      {currentScreen === 'player' && playingItem && (
-        <VideoPlayerView
-          key={playingItem.id}
-          item={playingItem}
-          visible={true}
-          onClose={() => setPlayingItem(null)}
-          onRoomRecap={(item) => {
-            setRecapModalItem(item);
-          }}
-        />
-      )}
+              {/* Content Rows */}
+              {categories.map((category, index) => (
+                <ContentRow
+                  key={category.id}
+                  category={category}
+                  rowIndex={index + 2}
+                  focusedItemId={focusedItemId}
+                  onItemFocus={handleCardFocus}
+                  onItemSelect={handleCardSelect}
+                  isFirstRow={index === 0}
+                />
+              ))}
+            </ScrollView>
+          </ImageBackground>
+        )}
 
-      {/* Title Details Modal (as View overlay) */}
-      {detailsModalItem && !playingItem && (
-        <TitleDetailsModal
-          item={detailsModalItem}
-          visible={true}
-          onClose={() => setDetailsModalItem(null)}
-          onPlay={(item) => {
-            setDetailsModalItem(null);
-            setPlayingItem(item);
-          }}
-          onRoomRecap={(item) => {
-            setDetailsModalItem(null);
-            setRecapModalItem(item);
-          }}
-        />
-      )}
+        {/* Video Player Screen */}
+        {currentScreen === 'player' && playingItem && (
+          <VideoPlayerView
+            key={playingItem.id}
+            item={playingItem}
+            visible={true}
+            onClose={() => setPlayingItem(null)}
+            onRoomRecap={(item) => {
+              setRecapModalItem(item);
+            }}
+          />
+        )}
 
-      {/* Ambient Room Context Recap Modal (as View overlay) */}
-      {recapModalItem && (
-        <AmbientRecapModal
-          item={recapModalItem}
-          visible={true}
-          onClose={() => setRecapModalItem(null)}
-        />
-      )}
-    </View>
+        {/* Title Details Modal (as View overlay) */}
+        {detailsModalItem && !playingItem && (
+          <TitleDetailsModal
+            item={detailsModalItem}
+            visible={true}
+            onClose={() => setDetailsModalItem(null)}
+            onPlay={(item) => {
+              setDetailsModalItem(null);
+              setPlayingItem(item);
+            }}
+            onRoomRecap={(item) => {
+              setDetailsModalItem(null);
+              setRecapModalItem(item);
+            }}
+          />
+        )}
+
+        {/* Ambient Room Context Recap Modal (as View overlay) */}
+        {recapModalItem && (
+          <AmbientRecapModal
+            item={recapModalItem}
+            visible={true}
+            onClose={() => setRecapModalItem(null)}
+          />
+        )}
+      </View>
+    </NavFocusProvider>
   );
 };
 

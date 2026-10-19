@@ -80,16 +80,25 @@ GESTURE_MAP = {
     'Victory': ('victory', 'Victory Detected', '✌️'),
 }
 
-# Horizontal swipe gesture tuning (normalized frame coordinates, 0..1).
+# Horizontal/vertical swipe gesture tuning (normalized frame coordinates, 0..1).
 # Tuned to tolerate the intermittent hand detection of the per-frame (IMAGE) recognizer.
 SWIPE_WINDOW_SEC = 0.7        # Time window over which motion is measured
 SWIPE_MIN_SAMPLES = 2         # Minimum tracked samples before a swipe can fire
 SWIPE_MIN_TIME_SEC = 0.08     # Minimum sample time span needed to infer a direction
 SWIPE_DX_THRESHOLD = 0.12     # Minimum horizontal travel (fraction of frame width)
-SWIPE_DOMINANCE_RATIO = 1.4   # Horizontal motion must exceed vertical by this factor
+SWIPE_DY_THRESHOLD = 0.14     # Minimum vertical travel (fraction of frame height; 4:3 frame)
+SWIPE_DOMINANCE_RATIO = 1.4   # Swipe axis must exceed the other by this factor
 SWIPE_COOLDOWN_SEC = 0.7      # Debounce between consecutive swipe dispatches
 SWIPE_SUPPRESS_SEC = 0.7      # Suppress gesture toggles right after a swipe dispatch
 SWIPE_PALM_LANDMARK = 9       # Middle-finger MCP: stable palm-center proxy
+
+# Swipe payload (emoji, human description) keyed by gesture name
+SWIPE_LABELS = {
+    'swipe_left': ('⏪', 'Swipe Left Detected'),
+    'swipe_right': ('⏩', 'Swipe Right Detected'),
+    'swipe_up': ('⬆️', 'Swipe Up Detected'),
+    'swipe_down': ('⬇️', 'Swipe Down Detected'),
+}
 
 
 class FrameUploader(threading.Thread):
@@ -225,7 +234,10 @@ class WebcamSensor:
             return False
 
     def _detect_swipe(self, results, now):
-        """Track horizontal palm motion and return 'swipe_left'/'swipe_right' when detected.
+        """Track palm motion and return a directional swipe when detected.
+
+        Returns 'swipe_left'/'swipe_right' for horizontal motion and
+        'swipe_up'/'swipe_down' for vertical motion.
 
         Tolerant of transient hand-detection dropouts: samples are only aged out by the
         time window, never cleared on a single missed frame (the per-frame recognizer
@@ -248,17 +260,25 @@ class WebcamSensor:
         dx = end_x - start_x
         dy = end_y - start_y
 
-        if self.swipe_debug and abs(dx) >= SWIPE_DX_THRESHOLD * 0.5:
+        if self.swipe_debug and (
+            abs(dx) >= SWIPE_DX_THRESHOLD * 0.5 or abs(dy) >= SWIPE_DY_THRESHOLD * 0.5
+        ):
             print(f"[SWIPE DEBUG] samples={len(self.swipe_history)} span={span:.2f}s dx={dx:+.2f} dy={dy:+.2f}")
 
         if span < SWIPE_MIN_TIME_SEC:
             return None
         if (now - self.last_swipe_time) < SWIPE_COOLDOWN_SEC:
             return None
+
         if abs(dx) >= SWIPE_DX_THRESHOLD and abs(dx) > abs(dy) * SWIPE_DOMINANCE_RATIO:
             self.last_swipe_time = now
             self.swipe_history.clear()
             return 'swipe_right' if dx > 0 else 'swipe_left'
+        if abs(dy) >= SWIPE_DY_THRESHOLD and abs(dy) > abs(dx) * SWIPE_DOMINANCE_RATIO:
+            self.last_swipe_time = now
+            self.swipe_history.clear()
+            # Image y grows downward: positive dy means the hand moved down
+            return 'swipe_down' if dy > 0 else 'swipe_up'
         return None
 
     def run_manual_mode(self):
@@ -274,6 +294,8 @@ class WebcamSensor:
         print("  [4] Hand Raised ✋ (hand_raised) -> toggles pause/play")
         print("  [5] Swipe Left ⏪ (swipe_left) -> seek back 5s")
         print("  [6] Swipe Right ⏩ (swipe_right) -> seek forward 5s")
+        print("  [7] Swipe Up ⬆️ (swipe_up) -> navigate up")
+        print("  [8] Swipe Down ⬇️ (swipe_down) -> navigate down")
         print("  [q] Quit")
         print("--------------------------------------------------------")
 
@@ -284,6 +306,8 @@ class WebcamSensor:
             '4': ('hand_raised', 1.0, 'Hand Raised Detected'),
             '5': ('swipe_left', 0.97, 'Swipe Left Detected'),
             '6': ('swipe_right', 0.97, 'Swipe Right Detected'),
+            '7': ('swipe_up', 0.97, 'Swipe Up Detected'),
+            '8': ('swipe_down', 0.97, 'Swipe Down Detected'),
         }
 
         while self.running:
@@ -298,7 +322,7 @@ class WebcamSensor:
                     # Default enter key sends open_palm
                     self.send_event(gesture='open_palm', confidence=0.95, message='Open Palm Detected')
                 else:
-                    print("Invalid selection. Choose 1-6, or q.")
+                    print("Invalid selection. Choose 1-8, or q.")
             except (EOFError, KeyboardInterrupt):
                 break
 
@@ -679,11 +703,10 @@ class WebcamSensor:
                             label_text = f"{detected_category}: {int(detected_score * 100)}%"
                             cv2.putText(annotated_rgb, label_text, (x_min, max(14, y_min - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 255, 255), 1)
 
-                # Horizontal swipe detection -> seek back / forward control
+                # Swipe detection -> horizontal seek (player) / vertical navigation (home)
                 swipe_gesture = self._detect_swipe(results, now)
                 if swipe_gesture:
-                    swipe_emoji = '⏩' if swipe_gesture == 'swipe_right' else '⏪'
-                    swipe_desc = 'Swipe Right Detected' if swipe_gesture == 'swipe_right' else 'Swipe Left Detected'
+                    swipe_emoji, swipe_desc = SWIPE_LABELS.get(swipe_gesture, ('↔', 'Swipe Detected'))
                     print(f"\n{swipe_emoji} [ML SWIPE DETECTED] {swipe_desc}")
                     self.send_event(
                         gesture=swipe_gesture,

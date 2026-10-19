@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import {TVFocusGuideView} from '@amazon-devices/react-native-kepler';
 import {MediaItem} from '../types/catalog';
+import {useNavFocus} from '../navigation/NavFocusContext';
 import {colors} from '../theme/theme';
 
 export interface HeroBannerProps {
@@ -26,6 +27,7 @@ export const HeroBanner = ({
   const [focusedBtn, setFocusedBtn] = useState<'explore' | 'info' | 'recap' | null>(
     null,
   );
+  const navFocus = useNavFocus();
 
   const formatDuration = (sec: number) => {
     if (!sec || sec < 300) {
@@ -94,12 +96,16 @@ export const HeroBanner = ({
           {/* TV Remote Interactive Buttons */}
           <TVFocusGuideView style={styles.actionRow}>
             <Pressable
+              ref={navFocus?.registerRef('hero-btn-explore')}
               style={[
                 styles.actionButton,
                 styles.primaryButton,
                 focusedBtn === 'explore' && styles.buttonFocused,
               ]}
-              onFocus={() => setFocusedBtn('explore')}
+              onFocus={() => {
+                setFocusedBtn('explore');
+                navFocus?.reportFocus({row: 0, col: 0});
+              }}
               onBlur={() => setFocusedBtn(null)}
               onPress={() => onExplore(item)}
               hasTVPreferredFocus={true}
@@ -111,12 +117,16 @@ export const HeroBanner = ({
             </Pressable>
 
             <Pressable
+              ref={navFocus?.registerRef('hero-btn-more-info')}
               style={[
                 styles.actionButton,
                 styles.secondaryButton,
                 focusedBtn === 'info' && styles.buttonFocused,
               ]}
-              onFocus={() => setFocusedBtn('info')}
+              onFocus={() => {
+                setFocusedBtn('info');
+                navFocus?.reportFocus({row: 0, col: 1});
+              }}
               onBlur={() => setFocusedBtn(null)}
               onPress={() => onMoreInfo(item)}
               accessibilityRole="button"
@@ -127,12 +137,16 @@ export const HeroBanner = ({
             </Pressable>
 
             <Pressable
+              ref={navFocus?.registerRef('hero-btn-room-recap')}
               style={[
                 styles.actionButton,
                 styles.aiRecapButton,
                 focusedBtn === 'recap' && styles.buttonFocused,
               ]}
-              onFocus={() => setFocusedBtn('recap')}
+              onFocus={() => {
+                setFocusedBtn('recap');
+                navFocus?.reportFocus({row: 0, col: 2});
+              }}
               onBlur={() => setFocusedBtn(null)}
               onPress={() => onRoomRecap(item)}
               accessibilityRole="button"

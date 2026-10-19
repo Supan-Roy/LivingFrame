@@ -1,8 +1,14 @@
 import React from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {colors} from '../theme/theme';
+import {useRoom} from '../context/RoomContext';
+import {useNavFocus} from '../navigation/NavFocusContext';
+import {HEADER_TOGGLE_ID} from '../navigation/focusGrid';
 
 export const Header = () => {
+  const {roomState, sendVisionCommand} = useRoom();
+  const navFocus = useNavFocus();
+
   return (
     <View style={styles.headerContainer}>
       {/* Brand & Wordmark */}
@@ -17,6 +23,32 @@ export const Header = () => {
           <Text style={styles.wordmarkSub}>RESPONSIVE TV EXPERIENCE</Text>
         </View>
       </View>
+
+      {/* Universal gesture-control switch (starts/stops the real webcam sensor) */}
+      <Pressable
+        ref={navFocus?.registerRef(HEADER_TOGGLE_ID)}
+        style={[
+          styles.gestureToggle,
+          roomState.visionEnabled && styles.gestureToggleOn,
+        ]}
+        onFocus={() => navFocus?.reportFocus({row: 0, col: 0})}
+        onPress={() => sendVisionCommand(!roomState.visionEnabled)}
+        accessibilityRole="button"
+        accessibilityLabel={
+          roomState.visionEnabled
+            ? 'Turn off gesture control'
+            : 'Turn on gesture control'
+        }
+        testID={HEADER_TOGGLE_ID}>
+        <Text style={styles.gestureToggleIcon}>🎥</Text>
+        <Text
+          style={[
+            styles.gestureToggleText,
+            roomState.visionEnabled && styles.gestureToggleTextOn,
+          ]}>
+          {roomState.visionEnabled ? 'GESTURES ON' : 'GESTURES OFF'}
+        </Text>
+      </Pressable>
     </View>
   );
 };
@@ -69,5 +101,32 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     color: colors.textSecondary,
     marginTop: -2,
+  },
+  gestureToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.35)',
+  },
+  gestureToggleOn: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderColor: 'rgba(16, 185, 129, 0.6)',
+  },
+  gestureToggleIcon: {
+    fontSize: 14,
+    marginRight: 8,
+  },
+  gestureToggleText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  gestureToggleTextOn: {
+    color: '#6EE7B7',
   },
 });

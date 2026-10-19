@@ -3,10 +3,12 @@ import {StyleSheet, Text, View, ScrollView} from 'react-native';
 import {TVFocusGuideView} from '@amazon-devices/react-native-kepler';
 import {ContentCategory, MediaItem} from '../types/catalog';
 import {ContentCard} from './ContentCard';
+import {useNavFocus} from '../navigation/NavFocusContext';
 import {colors, spacing} from '../theme/theme';
 
 export interface ContentRowProps {
   category: ContentCategory;
+  rowIndex: number;
   focusedItemId: string | null;
   onItemFocus: (item: MediaItem) => void;
   onItemSelect: (item: MediaItem) => void;
@@ -15,16 +17,19 @@ export interface ContentRowProps {
 
 export const ContentRow = ({
   category,
+  rowIndex,
   focusedItemId,
   onItemFocus,
   onItemSelect,
   isFirstRow,
 }: ContentRowProps) => {
   const scrollViewRef = useRef<ScrollView>(null);
+  const navFocus = useNavFocus();
 
   const handleCardFocus = (item: MediaItem, index: number) => {
     onItemFocus(item);
-    // Smooth auto-scroll for TV remote navigation
+    navFocus?.reportFocus({row: rowIndex, col: index});
+    // Smooth auto-scroll for TV remote / gesture navigation
     const targetOffset = Math.max(
       0,
       index * (spacing.cardWidth + spacing.cardGap) - 48,
@@ -47,17 +52,21 @@ export const ContentRow = ({
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}>
-          {category.items.map((item, index) => (
-            <ContentCard
-              key={`${category.id}-${item.id}`}
-              item={item}
-              isFocused={focusedItemId === item.id}
-              onFocus={() => handleCardFocus(item, index)}
-              onPress={() => onItemSelect(item)}
-              testID={`card-${category.id}-${item.id}`}
-              hasTVPreferredFocus={isFirstRow && index === 0}
-            />
-          ))}
+          {category.items.map((item, index) => {
+            const cellId = `card-${category.id}-${item.id}`;
+            return (
+              <ContentCard
+                key={cellId}
+                ref={navFocus?.registerRef(cellId)}
+                item={item}
+                isFocused={focusedItemId === item.id}
+                onFocus={() => handleCardFocus(item, index)}
+                onPress={() => onItemSelect(item)}
+                testID={cellId}
+                hasTVPreferredFocus={isFirstRow && index === 0}
+              />
+            );
+          })}
         </ScrollView>
       </TVFocusGuideView>
     </View>
