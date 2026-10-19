@@ -162,6 +162,13 @@ export const VideoPlayerView = ({
       }
     };
 
+    const onLoadedData = () => {
+      console.info('[LivingFrame Video] Event: loadeddata (first frame ready)');
+      if (isMountedRef.current) {
+        setIsVideoLoading(false);
+      }
+    };
+
     const onCanPlay = () => {
       console.info('[LivingFrame Video] Event: canplay -> calling player.play()');
       if (isMountedRef.current) {
@@ -238,6 +245,7 @@ export const VideoPlayerView = ({
       .then(() => {
         console.info('[LivingFrame Video] VideoPlayer initialized successfully');
         player.addEventListener('loadedmetadata', onLoadedMetadata);
+        player.addEventListener('loadeddata', onLoadedData);
         player.addEventListener('canplay', onCanPlay);
         player.addEventListener('playing', onPlaying);
         player.addEventListener('timeupdate', onTimeUpdate);
@@ -269,6 +277,7 @@ export const VideoPlayerView = ({
           player.clearSurfaceHandle(surfaceHandleRef.current);
         }
         player.removeEventListener('loadedmetadata', onLoadedMetadata);
+        player.removeEventListener('loadeddata', onLoadedData);
         player.removeEventListener('canplay', onCanPlay);
         player.removeEventListener('playing', onPlaying);
         player.removeEventListener('timeupdate', onTimeUpdate);

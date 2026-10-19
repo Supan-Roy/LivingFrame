@@ -458,7 +458,18 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Video streaming endpoint with Range request support (HTTP 206)
+// In-memory cache for fast video streaming without disk I/O
+const videoBufferCache = new Map();
+function getCachedVideoBuffer(filePath) {
+  let buf = videoBufferCache.get(filePath);
+  if (!buf) {
+    buf = fs.readFileSync(filePath);
+    videoBufferCache.set(filePath, buf);
+  }
+  return buf;
+}
+
+  // Video streaming endpoint with Range request support (HTTP 206) & in-memory caching
   if (url.startsWith('/videos/')) {
     const rawName = url.split('?')[0].replace('/videos/', '');
     const safeName = path.basename(rawName);
@@ -481,36 +492,43 @@ const server = http.createServer((req, res) => {
         'Content-Length': fileSize,
         'Accept-Ranges': 'bytes',
         'Content-Type': 'video/mp4',
+        'Cache-Control': 'public, max-age=86400, immutable',
+        'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
       });
       res.end();
       return;
     }
 
+    const buf = getCachedVideoBuffer(filePath);
+
     if (range) {
       const parts = range.replace(/bytes=/, '').split('-');
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
       const chunksize = end - start + 1;
-      const file = fs.createReadStream(filePath, { start, end });
       const head = {
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': chunksize,
         'Content-Type': 'video/mp4',
+        'Cache-Control': 'public, max-age=86400, immutable',
+        'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
       };
       res.writeHead(206, head);
-      file.pipe(res);
+      res.end(buf.subarray(start, end + 1));
     } else {
       const head = {
         'Content-Length': fileSize,
         'Accept-Ranges': 'bytes',
         'Content-Type': 'video/mp4',
+        'Cache-Control': 'public, max-age=86400, immutable',
+        'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
       };
       res.writeHead(200, head);
-      fs.createReadStream(filePath).pipe(res);
+      res.end(buf);
     }
     return;
   }
