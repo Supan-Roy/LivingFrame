@@ -20,7 +20,10 @@ export interface UseGestureNavigationArgs {
 
 /**
  * Translates room-sensor gestures into TV focus movement on the browse screen:
- * directional swipes move the focus cursor, a hand raise activates the focused cell.
+ * directional swipes move the focus cursor, a thumbs-up activates the focused cell.
+ *
+ * A thumbs-up is used for activation (not the open palm) because the open palm is the
+ * pose held while swiping — reusing it made every swipe also press a button.
  *
  * Each gesture event is handled exactly once (deduped by event id) and native focus
  * does the rest — `requestTVFocus()` triggers the normal `onFocus` handlers, so row
@@ -68,7 +71,7 @@ export const useGestureNavigation = ({
       return;
     }
 
-    if (gesture === 'hand_raised') {
+    if (gesture === 'thumbs_up') {
       activatePosition(grid, cursor.current);
     }
   }, [roomState.lastEvent, enabled, grid, cursor, refs]);

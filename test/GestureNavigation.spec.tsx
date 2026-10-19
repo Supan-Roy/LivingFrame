@@ -92,20 +92,30 @@ describe('useGestureNavigation', () => {
     expect(cursor.current).toEqual({row: 0, col: 0});
   });
 
-  it('activates the focused cell on a hand raise', () => {
+  it('activates the focused cell on a thumbs-up', () => {
     const {grid} = setup();
     // cursor is {row: 2, col: 0} -> the c00 cell
-    fire('hand_raised');
+    fire('thumbs_up');
 
     expect(grid[2][0].onActivate).toHaveBeenCalledTimes(1);
     expect(grid[1][0].onActivate).not.toHaveBeenCalled();
+  });
+
+  it('does not activate on a hand raise (that pose is used for swiping)', () => {
+    const {grid} = setup();
+
+    fire('hand_raised');
+
+    grid.forEach(row =>
+      row.forEach(cell => expect(cell.onActivate).not.toHaveBeenCalled()),
+    );
   });
 
   it('ignores gestures while disabled', () => {
     const {nodes, grid, cursor} = setup(false);
 
     fire('swipe_right');
-    fire('hand_raised');
+    fire('thumbs_up');
 
     nodes.forEach(node => expect(node.requestTVFocus).not.toHaveBeenCalled());
     grid.forEach(row => row.forEach(cell => expect(cell.onActivate).not.toHaveBeenCalled()));
