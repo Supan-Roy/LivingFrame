@@ -42,6 +42,8 @@ models/*.task
 *.mp4
 *.webm
 *.raw
+*.bak
+.commandcode/
 !src/assets/**
 captures/
 screenshots/

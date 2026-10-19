@@ -29,12 +29,14 @@ export interface RoomEvent {
     | 'viewer_left'
     | 'gesture_detected'
     | 'recap_requested'
-    | 'connectivity_test';
+    | 'connectivity_test'
+    | 'play_video';
   timestamp: number;
   payload: {
     viewerCount?: number;
     gesture?: RoomGestureType;
     message?: string;
+    itemId?: string;
   };
 }
 

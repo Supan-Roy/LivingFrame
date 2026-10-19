@@ -172,6 +172,27 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
                 },
               },
             }));
+          } else if (
+            parsed.type === 'play_video' ||
+            parsed.action === 'play' ||
+            parsed.type === 'play'
+          ) {
+            const targetItemId =
+              parsed.itemId || parsed.id || 'behind-the-screams';
+            console.log(
+              `[LivingFrame WS] PLAY VIDEO COMMAND: target "${targetItemId}"`,
+            );
+            setRoomState((prev) => ({
+              ...prev,
+              lastEvent: {
+                id: `evt-${Date.now()}`,
+                type: 'play_video',
+                timestamp: receivedTimestamp,
+                payload: {
+                  itemId: targetItemId,
+                },
+              },
+            }));
           } else if (parsed.type === 'viewer_entered' || parsed.type === 'viewer_left') {
             const count = parsed.payload?.viewerCount ?? parsed.count;
             setRoomState((prev) => ({

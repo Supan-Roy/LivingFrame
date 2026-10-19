@@ -62,27 +62,27 @@ describe('LivingFrame App', () => {
   });
 
   it('renders the header brand and room sensor status', () => {
-    const screen = render(<App />);
+    const screen = render(<App initialScreen="home" />);
     expect(screen.getByTestId('header-brand-title')).toBeTruthy();
     expect(screen.getByTestId('header-room-pill')).toBeTruthy();
   });
 
   it('renders prominent hero action buttons', () => {
-    const screen = render(<App />);
+    const screen = render(<App initialScreen="home" />);
     expect(screen.getByTestId('hero-btn-explore')).toBeTruthy();
     expect(screen.getByTestId('hero-btn-more-info')).toBeTruthy();
     expect(screen.getByTestId('hero-btn-room-recap')).toBeTruthy();
   });
 
   it('renders content rows and cards', () => {
-    const screen = render(<App />);
+    const screen = render(<App initialScreen="home" />);
     expect(
       screen.getByTestId('card-trending-featured-behind-the-screams'),
     ).toBeTruthy();
   });
 
   it('registers TV event handler for remote home button and exits app', () => {
-    render(<App />);
+    render(<App initialScreen="home" />);
 
     expect(useTVEventHandler).toHaveBeenCalled();
     const eventHandler = (useTVEventHandler as unknown as jest.Mock).mock.calls[0][0];
@@ -94,7 +94,7 @@ describe('LivingFrame App', () => {
   });
 
   it('exits app when back button is pressed at root screen', () => {
-    render(<App />);
+    render(<App initialScreen="home" />);
 
     const mockBackHandler = (useKeplerBackHandler as unknown as jest.Mock).mock.results[0].value;
     expect(mockBackHandler.addEventListener).toHaveBeenCalledWith(
@@ -108,7 +108,7 @@ describe('LivingFrame App', () => {
   });
 
   it('plays video when Watch Now is pressed on HeroBanner', () => {
-    const screen = render(<App />);
+    const screen = render(<App initialScreen="home" />);
 
     const watchNowBtn = screen.getByTestId('hero-btn-explore');
     expect(watchNowBtn).toBeTruthy();

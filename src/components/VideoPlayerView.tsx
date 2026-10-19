@@ -28,6 +28,17 @@ export interface VideoPlayerViewProps {
   onRoomRecap: (item: MediaItem) => void;
 }
 
+const sendDebugLog = (msg: string) => {
+  console.info(`[LivingFrame Video] ${msg}`);
+  try {
+    fetch('http://10.0.2.2:8080/telemetry/log', {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: `[PLAYER] ${msg}`,
+    }).catch(() => {});
+  } catch (_e) {}
+};
+
 export const VideoPlayerView = ({
   item,
   visible = true,
@@ -47,219 +58,174 @@ export const VideoPlayerView = ({
     'back' | 'play' | 'restart' | 'recap'
   >('play');
 
-  const videoPlayerRef = useRef<VideoPlayer | null>(null);
+  const playerRef = useRef<VideoPlayer | null>(null);
   const surfaceHandleRef = useRef<string | null>(null);
   const isPlayingRef = useRef<boolean>(true);
+  const isMountedRef = useRef<boolean>(true);
   const {roomState} = useRoom();
 
-  // Surface view callbacks from KeplerVideoSurfaceView
-  const onSurfaceViewCreated = useCallback((handle: string) => {
-    console.info('[LivingFrame Video] onSurfaceViewCreated handle:', handle);
-    surfaceHandleRef.current = handle;
-    if (videoPlayerRef.current) {
-      console.info('[LivingFrame Video] Attaching surface handle to active player:', handle);
-      (videoPlayerRef.current as any).surfaceHandle = handle;
-      videoPlayerRef.current.setSurfaceHandle(handle);
-      if (isPlayingRef.current) {
-        console.info('[LivingFrame Video] Calling play on surface created');
-        videoPlayerRef.current.play().catch((err) => {
-          console.warn('[LivingFrame Video] play on surface created notice:', err);
-        });
-      }
-    }
-  }, []);
+  const targetSrc = item?.videoUrl || (item?.id ? `http://10.0.2.2:8080/videos/${item.id}.mp4` : '');
 
-  const onSurfaceViewDestroyed = useCallback((handle: string) => {
-    console.info('[LivingFrame Video] onSurfaceViewDestroyed handle:', handle);
-    if (videoPlayerRef.current) {
-      try {
-        videoPlayerRef.current.clearSurfaceHandle(handle);
-      } catch (e) {
-        // ignore
-      }
-    }
-    surfaceHandleRef.current = null;
-  }, []);
-
-  // W3C VideoPlayer lifecycle management matching official Amazon Vega architecture
+  // Manage VideoPlayer lifecycle
   useEffect(() => {
-    if (!visible || !item?.videoUrl) {
-      return;
-    }
-
-    let isMounted = true;
+    isMountedRef.current = true;
     setIsVideoLoading(true);
     setCurrentTimeSec(0);
     setIsPlaying(true);
     isPlayingRef.current = true;
 
+    sendDebugLog(`Creating new VideoPlayer instance for item: ${item?.id} src=${targetSrc}`);
     const player = new VideoPlayer();
-    videoPlayerRef.current = player;
+    playerRef.current = player;
 
-    // Emulator compatibility: The x86_64 Vega VM has no PulseAudio daemon / physical audio HAL.
-    // Audio muting must be configured prior to initialize() so W3CMediaTurboModule.muteAudio
-    // is registered during native initialization, preventing GStreamer clock lockup.
-    player.defaultMuted = true;
-    player.muted = true;
-    player.volume = 0;
+    const onLoadedMetadata = () => {
+      const dur = player.duration;
+      sendDebugLog(`EVENT: loadedmetadata duration=${dur}`);
+      if (dur && !isNaN(dur) && dur > 0) {
+        setDurationSec(Math.round(dur));
+      }
+    };
 
-    if (surfaceHandleRef.current) {
-      (player as any).surfaceHandle = surfaceHandleRef.current;
-    }
+    const onCanPlay = () => {
+      sendDebugLog('EVENT: canplay -> calling player.play()');
+      if (isMountedRef.current) {
+        setIsVideoLoading(false);
+        player.play().catch(e => {
+          sendDebugLog(`play notice: ${e}`);
+        });
+      }
+    };
+
+    const onPlaying = () => {
+      sendDebugLog('EVENT: playing');
+      if (isMountedRef.current) {
+        setIsPlaying(true);
+        isPlayingRef.current = true;
+        setIsVideoLoading(false);
+      }
+    };
+
+    const onTimeUpdate = () => {
+      if (!isMountedRef.current) return;
+      const ct = player.currentTime;
+      sendDebugLog(`EVENT: timeupdate ct=${ct}`);
+      if (ct != null && !isNaN(ct)) {
+        setCurrentTimeSec(Math.floor(ct));
+      }
+      const dur = player.duration;
+      if (dur && !isNaN(dur) && dur > 0) {
+        setDurationSec(Math.round(dur));
+      }
+      setIsVideoLoading(false);
+    };
+
+    const onPause = () => {
+      sendDebugLog('EVENT: pause');
+      if (isMountedRef.current) {
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+      }
+    };
+
+    const onError = () => {
+      const err = player.error;
+      sendDebugLog(`EVENT: error code=${err?.code} msg=${err?.message}`);
+      if (isMountedRef.current) {
+        setIsVideoLoading(false);
+      }
+    };
+
+    const onEnded = () => {
+      sendDebugLog('EVENT: ended -> looping');
+      try {
+        player.currentTime = 0;
+        player.play().catch(() => {});
+      } catch (_e) {}
+    };
 
     player
       .initialize()
       .then(() => {
-        if (!isMounted) {
-          return;
-        }
-        console.info('[LivingFrame Video] VideoPlayer initialized successfully for:', item.videoUrl);
+        sendDebugLog('VideoPlayer initialized successfully');
+        player.addEventListener('loadedmetadata', onLoadedMetadata);
+        player.addEventListener('canplay', onCanPlay);
+        player.addEventListener('playing', onPlaying);
+        player.addEventListener('timeupdate', onTimeUpdate);
+        player.addEventListener('pause', onPause);
+        player.addEventListener('error', onError);
+        player.addEventListener('ended', onEnded);
 
-        player.addEventListener('loadedmetadata', () => {
-          if (!isMounted) {
-            return;
-          }
-          console.info('[LivingFrame Video] loadedmetadata duration:', player.duration);
-          if (player.duration && !isNaN(player.duration) && player.duration > 0) {
-            setDurationSec(Math.round(player.duration));
-          }
-          setIsVideoLoading(false);
-        });
-
-        player.addEventListener('loadeddata', () => {
-          if (!isMounted) {
-            return;
-          }
-          console.info('[LivingFrame Video] loadeddata');
-          setIsVideoLoading(false);
-        });
-
-        player.addEventListener('canplay', () => {
-          if (!isMounted) {
-            return;
-          }
-          console.info('[LivingFrame Video] canplay');
-          setIsVideoLoading(false);
-        });
-
-        player.addEventListener('timeupdate', () => {
-          if (!isMounted) {
-            return;
-          }
-          if (player.currentTime != null && !isNaN(player.currentTime)) {
-            setCurrentTimeSec(Math.floor(player.currentTime));
-          }
-          if (player.duration && !isNaN(player.duration) && player.duration > 0) {
-            setDurationSec(Math.round(player.duration));
-          }
-          setIsVideoLoading(false);
-        });
-
-        player.addEventListener('playing', () => {
-          if (!isMounted) {
-            return;
-          }
-          console.info('[LivingFrame Video] playing event received');
-          setIsPlaying(true);
-          isPlayingRef.current = true;
-          setIsVideoLoading(false);
-        });
-
-        player.addEventListener('pause', () => {
-          if (!isMounted) {
-            return;
-          }
-          console.info('[LivingFrame Video] pause event received');
-          setIsPlaying(false);
-          isPlayingRef.current = false;
-        });
-
-        player.addEventListener('waiting', () => {
-          if (!isMounted) {
-            return;
-          }
-          console.info('[LivingFrame Video] waiting event (buffering)');
-          setIsVideoLoading(true);
-        });
-
-        player.addEventListener('ended', () => {
-          if (!isMounted) {
-            return;
-          }
-          console.info('[LivingFrame Video] video playback ended, restarting loop');
-          try {
-            player.currentTime = 0;
-            player.play().catch(console.warn);
-          } catch (e) {
-            console.warn('[LivingFrame Video] loop restart notice:', e);
-          }
-        });
-
-        player.addEventListener('error', (event: any) => {
-          const errMsg =
-            event?.target?.mediaControlStateUtil?.mError?.message_ ||
-            'Video playback event';
-          console.warn('[LivingFrame Video] player error notice:', errMsg);
-          setIsVideoLoading(false);
-        });
-
-        // If surface handle was already created during initialization, attach BEFORE setting src
-        if (surfaceHandleRef.current) {
-          console.info('[LivingFrame Video] Attaching pre-created surface handle before src:', surfaceHandleRef.current);
-          player.setSurfaceHandle(surfaceHandleRef.current);
-        }
-
-        // Set media URL and enable native autoplay directly
-        const localUrl = item.id ? `http://10.0.2.2:8080/videos/${item.id}.mp4` : null;
-        const targetSrc = localUrl || item.videoUrl || '';
-        console.info('[LivingFrame Video] Setting player.src to:', targetSrc);
-        player.autoplay = true;
-        player.loop = true;
+        player.autoplay = false;
         player.muted = true;
-        player.defaultMuted = true;
-        player.src = targetSrc;
 
-        player.play().catch((err) => {
-          console.warn('[LivingFrame Video] play on init notice:', err);
-        });
+        if (surfaceHandleRef.current) {
+          sendDebugLog(`Attaching existing surface handle ${surfaceHandleRef.current}`);
+          player.setSurfaceHandle(surfaceHandleRef.current);
+          player.src = targetSrc;
+          player.load();
+        }
       })
-      .catch((err) => {
-        console.error('[LivingFrame Video] VideoPlayer.initialize error:', err);
-        setIsVideoLoading(false);
+      .catch(err => {
+        sendDebugLog(`VideoPlayer initialize error: ${err}`);
       });
 
     return () => {
-      isMounted = false;
-      if (videoPlayerRef.current) {
+      isMountedRef.current = false;
+      sendDebugLog(`Tearing down VideoPlayer for item: ${item?.id}`);
+      try {
+        player.pause();
         if (surfaceHandleRef.current) {
-          try {
-            videoPlayerRef.current.clearSurfaceHandle(surfaceHandleRef.current);
-          } catch (e) {
-            // ignore
-          }
+          player.clearSurfaceHandle(surfaceHandleRef.current);
         }
-        try {
-          videoPlayerRef.current.pause();
-          const p = videoPlayerRef.current as any;
-          if (typeof p.deinitializeSync === 'function') {
-            p.deinitializeSync(1000);
-          } else {
-            videoPlayerRef.current.deinitialize();
-          }
-        } catch (e) {
-          // ignore
-        }
-        videoPlayerRef.current = null;
+        player.removeEventListener('loadedmetadata', onLoadedMetadata);
+        player.removeEventListener('canplay', onCanPlay);
+        player.removeEventListener('playing', onPlaying);
+        player.removeEventListener('timeupdate', onTimeUpdate);
+        player.removeEventListener('pause', onPause);
+        player.removeEventListener('error', onError);
+        player.removeEventListener('ended', onEnded);
+        player.deinitialize().catch(() => {});
+      } catch (e) {
+        sendDebugLog(`Error during player deinit: ${e}`);
       }
-      surfaceHandleRef.current = null;
+      playerRef.current = null;
     };
-  }, [visible, item?.id, item?.videoUrl]);
+  }, [item?.id, targetSrc]);
+
+  const handleSurfaceCreated = useCallback(
+    (handle: string) => {
+      sendDebugLog(`EVENT: onSurfaceViewCreated handle=${handle}`);
+      surfaceHandleRef.current = handle;
+      if (playerRef.current) {
+        try {
+          playerRef.current.setSurfaceHandle(handle);
+          playerRef.current.src = targetSrc;
+          playerRef.current.load();
+        } catch (e) {
+          sendDebugLog(`Error in setSurfaceHandle/load: ${e}`);
+        }
+      }
+    },
+    [targetSrc],
+  );
+
+  const handleSurfaceDestroyed = useCallback((handle: string) => {
+    sendDebugLog(`EVENT: onSurfaceViewDestroyed handle=${handle}`);
+    if (playerRef.current) {
+      try {
+        playerRef.current.clearSurfaceHandle(handle);
+      } catch (e) {
+        sendDebugLog(`Error in clearSurfaceHandle: ${e}`);
+      }
+    }
+    surfaceHandleRef.current = null;
+  }, []);
 
   // Playback control functions
   const handlePlay = useCallback(() => {
-    if (videoPlayerRef.current) {
+    if (playerRef.current) {
       try {
-        videoPlayerRef.current.play();
+        playerRef.current.play().catch(e => sendDebugLog(`play error: ${e}`));
       } catch (e) {
         console.warn('[LivingFrame Video] play notice:', e);
       }
@@ -273,9 +239,9 @@ export const VideoPlayerView = ({
       console.info('[LivingFrame Video] Ignoring pause while video is loading');
       return;
     }
-    if (videoPlayerRef.current) {
+    if (playerRef.current) {
       try {
-        videoPlayerRef.current.pause();
+        playerRef.current.pause();
       } catch (e) {
         console.warn('[LivingFrame Video] pause notice:', e);
       }
@@ -297,10 +263,10 @@ export const VideoPlayerView = ({
   }, [isPlaying, isVideoLoading, handlePause, handlePlay]);
 
   const handleRestart = useCallback(() => {
-    if (videoPlayerRef.current) {
+    if (playerRef.current) {
       try {
-        videoPlayerRef.current.currentTime = 0;
-        videoPlayerRef.current.play();
+        playerRef.current.currentTime = 0;
+        playerRef.current.play().catch(e => sendDebugLog(`restart play error: ${e}`));
       } catch (e) {
         console.warn('[LivingFrame Video] restart notice:', e);
       }
@@ -321,17 +287,17 @@ export const VideoPlayerView = ({
     } else if (eventType === 'pause' || eventType === 'media_pause') {
       handlePause();
     } else if (eventType === 'rewind' || eventType === 'media_rewind') {
-      if (videoPlayerRef.current) {
-        videoPlayerRef.current.currentTime = Math.max(
+      if (playerRef.current) {
+        playerRef.current.currentTime = Math.max(
           0,
-          (videoPlayerRef.current.currentTime || 0) - 10,
+          (playerRef.current.currentTime || 0) - 10,
         );
       }
     } else if (eventType === 'fastforward' || eventType === 'media_fast_forward') {
-      if (videoPlayerRef.current) {
-        videoPlayerRef.current.currentTime = Math.min(
+      if (playerRef.current) {
+        playerRef.current.currentTime = Math.min(
           durationSec,
-          (videoPlayerRef.current.currentTime || 0) + 10,
+          (playerRef.current.currentTime || 0) + 10,
         );
       }
     }
@@ -354,7 +320,7 @@ export const VideoPlayerView = ({
 
   return (
     <View style={styles.playerContainer} testID="livingframe-videoplayer-view">
-      {/* 1. Hardware Accelerated Native Video Surface rendered by Vega Media Engine */}
+      {/* 1. Hardware Accelerated Native Video rendered by Vega Media Engine */}
       <View
         style={[
           styles.surfaceWrapper,
@@ -372,8 +338,8 @@ export const VideoPlayerView = ({
             },
           ]}
           scalingmode="fit"
-          onSurfaceViewCreated={onSurfaceViewCreated}
-          onSurfaceViewDestroyed={onSurfaceViewDestroyed}
+          onSurfaceViewCreated={handleSurfaceCreated}
+          onSurfaceViewDestroyed={handleSurfaceDestroyed}
           testID="kepler-video-surface-view"
         />
       </View>

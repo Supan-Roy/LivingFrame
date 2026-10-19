@@ -75,6 +75,18 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // App telemetry debug logger
+  if (url === '/telemetry/log') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      console.log(`[VEGA APP] ${body}`);
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ status: 'logged' }));
+    });
+    return;
+  }
+
   // Camera preview endpoints
   if (url === '/camera/frame') {
     if (req.method === 'POST') {
@@ -402,6 +414,8 @@ const server = http.createServer((req, res) => {
             handedness: parsed.handedness,
             engine: parsed.engine || 'mediapipe',
             message: parsed.message || (gesture ? `${gesture.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} Detected` : 'Event from Laptop Sensor'),
+            itemId: parsed.itemId,
+            payload: { itemId: parsed.itemId },
             timestamp: parsed.timestamp || Date.now(),
           };
           const count = broadcast(payload);
@@ -422,6 +436,7 @@ const server = http.createServer((req, res) => {
     const gesture = parsedUrl.searchParams.get('gesture') || pathGesture || (url.includes('hand_raised') ? 'hand_raised' : undefined);
     const type = parsedUrl.searchParams.get('type') || (gesture ? 'gesture_detected' : 'connectivity_test');
     const customMessage = parsedUrl.searchParams.get('message') || (gesture ? `${gesture.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} Detected` : 'Triggered Event from Laptop');
+    const itemId = parsedUrl.searchParams.get('itemId') || undefined;
 
     const payload = {
       type: type,
@@ -429,6 +444,8 @@ const server = http.createServer((req, res) => {
       confidence: parseFloat(parsedUrl.searchParams.get('confidence')) || 0.95,
       engine: parsedUrl.searchParams.get('engine') || 'mediapipe',
       message: customMessage,
+      itemId: itemId,
+      payload: { itemId: itemId },
       timestamp: Date.now(),
     };
     const count = broadcast(payload);
@@ -458,6 +475,17 @@ const server = http.createServer((req, res) => {
     const fileSize = stat.size;
     const range = req.headers.range;
     console.log(`[HTTP Video Stream] ${req.method} ${safeName} range=${range || 'none'} size=${fileSize}`);
+
+    if (req.method === 'HEAD') {
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Accept-Ranges': 'bytes',
+        'Content-Type': 'video/mp4',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.end();
+      return;
+    }
 
     if (range) {
       const parts = range.replace(/bytes=/, '').split('-');

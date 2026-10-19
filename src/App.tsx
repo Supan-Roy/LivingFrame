@@ -11,7 +11,7 @@ import {
   useKeplerBackHandler,
   HWEvent,
 } from '@amazon-devices/react-native-kepler';
-import {RoomProvider} from './context/RoomContext';
+import {RoomProvider, useRoom} from './context/RoomContext';
 import {ContentCategory, MediaItem} from './types/catalog';
 import {fallbackCategories, fallbackMediaItems} from './data/catalogData';
 import {CatalogService} from './services/catalogService';
@@ -22,6 +22,7 @@ import {TitleDetailsModal} from './components/TitleDetailsModal';
 import {AmbientRecapModal} from './components/AmbientRecapModal';
 import {GestureReactionOverlay} from './components/GestureReactionOverlay';
 import {VideoPlayerView} from './components/VideoPlayerView';
+import {MinimalVideoProbe} from './components/MinimalVideoProbe';
 import {colors} from './theme/theme';
 
 export const LivingFrameHome = () => {
@@ -35,6 +36,16 @@ export const LivingFrameHome = () => {
   const [detailsModalItem, setDetailsModalItem] = useState<MediaItem | null>(null);
   const [recapModalItem, setRecapModalItem] = useState<MediaItem | null>(null);
   const [playingItem, setPlayingItem] = useState<MediaItem | null>(null);
+  const {roomState} = useRoom();
+
+  // Listen to remote play_video commands from telemetry server / gestures
+  useEffect(() => {
+    if (roomState.lastEvent?.type === 'play_video') {
+      const targetId = (roomState.lastEvent.payload as any)?.itemId;
+      const found = fallbackMediaItems.find(m => m.id === targetId) || featuredItem;
+      setPlayingItem(prev => (prev?.id === found?.id ? prev : found));
+    }
+  }, [roomState.lastEvent, featuredItem]);
 
   const keplerBackHandler = useKeplerBackHandler();
 
@@ -192,6 +203,7 @@ export const LivingFrameHome = () => {
       {/* Video Player Screen */}
       {currentScreen === 'player' && playingItem && (
         <VideoPlayerView
+          key={playingItem.id}
           item={playingItem}
           visible={true}
           onClose={() => setPlayingItem(null)}
@@ -230,10 +242,18 @@ export const LivingFrameHome = () => {
   );
 };
 
-export const App = () => {
+export interface AppProps {
+  initialScreen?: 'probe' | 'home';
+}
+
+export const App = ({initialScreen = 'home'}: AppProps) => {
   return (
     <RoomProvider>
-      <LivingFrameHome />
+      {initialScreen === 'probe' ? (
+        <MinimalVideoProbe />
+      ) : (
+        <LivingFrameHome />
+      )}
     </RoomProvider>
   );
 };
