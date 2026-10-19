@@ -266,9 +266,7 @@ class WebcamSensor:
         dx = end_x - start_x
         dy = end_y - start_y
 
-        if self.swipe_debug and (
-            abs(dx) >= SWIPE_DX_THRESHOLD * 0.5 or abs(dy) >= SWIPE_DY_THRESHOLD * 0.5
-        ):
+        if self.swipe_debug and (abs(dx) >= 0.03 or abs(dy) >= 0.03):
             print(f"[SWIPE DEBUG] samples={len(self.swipe_history)} span={span:.2f}s dx={dx:+.2f} dy={dy:+.2f}")
 
         if span < SWIPE_MIN_TIME_SEC:

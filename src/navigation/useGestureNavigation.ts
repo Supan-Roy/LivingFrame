@@ -35,7 +35,7 @@ export const useGestureNavigation = ({
   refs,
   enabled,
 }: UseGestureNavigationArgs): void => {
-  const {roomState} = useRoom();
+  const {roomState, dismissGesture} = useRoom();
   const lastEventIdRef = useRef<string | null>(roomState.lastEvent?.id ?? null);
 
   useEffect(() => {
@@ -73,6 +73,10 @@ export const useGestureNavigation = ({
 
     if (gesture === 'thumbs_up') {
       activatePosition(grid, cursor.current);
+      // Consume the gesture: otherwise it lingers in activeGesture and the player,
+      // mounting right after, pops its own "thumbs-up → recap" card for the same
+      // gesture that just opened the video.
+      dismissGesture();
     }
-  }, [roomState.lastEvent, enabled, grid, cursor, refs]);
+  }, [roomState.lastEvent, enabled, grid, cursor, refs, dismissGesture]);
 };
