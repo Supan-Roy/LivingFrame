@@ -8,16 +8,21 @@ import {
 import {TVFocusGuideView} from '@amazon-devices/react-native-kepler';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
+import {RoomGestureType} from '../types/room';
 
 interface GestureReactionOverlayProps {
   onOpenRecap?: () => void;
+  hiddenGestures?: RoomGestureType[];
 }
 
-export const GestureReactionOverlay = ({onOpenRecap}: GestureReactionOverlayProps) => {
+export const GestureReactionOverlay = ({
+  onOpenRecap,
+  hiddenGestures = [],
+}: GestureReactionOverlayProps) => {
   const {roomState, dismissGesture} = useRoom();
   const [isBtnFocused, setIsBtnFocused] = React.useState(false);
 
-  if (!roomState.activeGesture) {
+  if (!roomState.activeGesture || hiddenGestures.includes(roomState.activeGesture)) {
     return null;
   }
 
@@ -60,6 +65,18 @@ export const GestureReactionOverlay = ({onOpenRecap}: GestureReactionOverlayProp
           icon: '✌️',
           title: 'VICTORY DETECTED',
           subtitle: 'Viewer celebration detected • Highlights available',
+        };
+      case 'swipe_left':
+        return {
+          icon: '⏪',
+          title: 'SWIPE LEFT DETECTED',
+          subtitle: 'Viewer swiped left • Seeking back 5 seconds',
+        };
+      case 'swipe_right':
+        return {
+          icon: '⏩',
+          title: 'SWIPE RIGHT DETECTED',
+          subtitle: 'Viewer swiped right • Seeking forward 5 seconds',
         };
       default:
         return {

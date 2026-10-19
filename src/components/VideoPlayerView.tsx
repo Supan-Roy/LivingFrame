@@ -17,6 +17,7 @@ import {
   KeplerVideoSurfaceView,
 } from '@amazon-devices/react-native-w3cmedia';
 import {MediaItem} from '../types/catalog';
+import {RoomGestureType} from '../types/room';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
 import {GestureReactionOverlay} from './GestureReactionOverlay';
@@ -27,6 +28,16 @@ export interface VideoPlayerViewProps {
   onClose: () => void;
   onRoomRecap: (item: MediaItem) => void;
 }
+
+// Gestures that drive playback control (rather than the ambient recap card)
+const PLAYBACK_CONTROL_GESTURES: RoomGestureType[] = [
+  'hand_raised',
+  'swipe_left',
+  'swipe_right',
+];
+
+// Seconds skipped per horizontal swipe gesture
+const GESTURE_SEEK_STEP_SEC = 5;
 
 export const VideoPlayerView = ({
   item,
@@ -44,9 +55,10 @@ export const VideoPlayerView = ({
   );
   const [isVideoLoading, setIsVideoLoading] = useState<boolean>(true);
   const [focusedControl, setFocusedControl] = useState<
-    'back' | 'play' | 'restart' | 'recap'
+    'back' | 'play' | 'restart' | 'recap' | 'gesture'
   >('play');
   const [controlsVisible, setControlsVisible] = useState<boolean>(true);
+  const [gestureFeedback, setGestureFeedback] = useState<string | null>(null);
 
   const playerRef = useRef<VideoPlayer | null>(null);
   const surfaceHandleRef = useRef<string | null>(null);
@@ -58,7 +70,9 @@ export const VideoPlayerView = ({
   const lastEndedTimeRef = useRef<number>(0);
   const isInitializedRef = useRef<boolean>(false);
   const isLoadedRef = useRef<boolean>(false);
-  const {roomState} = useRoom();
+  const gestureFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const {roomState, sendVisionCommand} = useRoom();
+  const lastGestureEventIdRef = useRef<string | null>(roomState.lastEvent?.id ?? null);
 
   const targetSrc = item?.videoUrl || (item?.id ? `http://10.0.2.2:8080/videos/${item.id}.mp4` : '');
 
@@ -149,6 +163,7 @@ export const VideoPlayerView = ({
     setIsPlaying(true);
     isPlayingRef.current = true;
     setControlsVisible(true);
+    setGestureFeedback(null);
 
     console.info(`[LivingFrame Video] Initializing player for item: ${item?.id} src=${targetSrc}`);
     const player = new VideoPlayer();
@@ -271,6 +286,9 @@ export const VideoPlayerView = ({
       if (hideTimerRef.current) {
         clearTimeout(hideTimerRef.current);
       }
+      if (gestureFeedbackTimerRef.current) {
+        clearTimeout(gestureFeedbackTimerRef.current);
+      }
       try {
         player.pause();
         if (surfaceHandleRef.current) {
@@ -381,6 +399,79 @@ export const VideoPlayerView = ({
     isPlayingRef.current = true;
   }, [resetHideTimer]);
 
+  const showGestureFeedback = useCallback((message: string) => {
+    setGestureFeedback(message);
+    if (gestureFeedbackTimerRef.current) {
+      clearTimeout(gestureFeedbackTimerRef.current);
+    }
+    gestureFeedbackTimerRef.current = setTimeout(() => {
+      if (isMountedRef.current) {
+        setGestureFeedback(null);
+      }
+    }, 1800);
+  }, []);
+
+  const seekRelative = useCallback(
+    (deltaSec: number) => {
+      const dur = durationSec > 0 ? durationSec : 0;
+      let target = currentTimeSec + deltaSec;
+      if (target < 0) {
+        target = 0;
+      }
+      if (dur > 0 && target > dur) {
+        target = dur;
+      }
+      pausedOffsetRef.current = target;
+      if (isPlayingRef.current) {
+        playbackStartWallRef.current = Date.now();
+      }
+      setCurrentTimeSec(target);
+      if (playerRef.current) {
+        try {
+          playerRef.current.currentTime = target;
+        } catch (e) {
+          console.warn('[LivingFrame Video] Gesture seek notice:', e);
+        }
+      }
+    },
+    [currentTimeSec, durationSec],
+  );
+
+  // React to room sensor gestures: hand raise toggles playback, swipes seek +/- 5s
+  useEffect(() => {
+    const event = roomState.lastEvent;
+    if (!event || event.type !== 'gesture_detected') {
+      return;
+    }
+    if (event.id === lastGestureEventIdRef.current) {
+      return;
+    }
+    lastGestureEventIdRef.current = event.id;
+
+    const gesture = event.payload?.gesture;
+    if (gesture === 'hand_raised') {
+      if (isVideoLoading) {
+        return;
+      }
+      handleTogglePlay();
+      showGestureFeedback(
+        isPlayingRef.current ? '⏸  Paused by gesture' : '▶  Playing by gesture',
+      );
+    } else if (gesture === 'swipe_left') {
+      seekRelative(-GESTURE_SEEK_STEP_SEC);
+      showGestureFeedback(`⏪  Rewind ${GESTURE_SEEK_STEP_SEC}s`);
+    } else if (gesture === 'swipe_right') {
+      seekRelative(GESTURE_SEEK_STEP_SEC);
+      showGestureFeedback(`⏩  Forward ${GESTURE_SEEK_STEP_SEC}s`);
+    }
+  }, [
+    roomState.lastEvent,
+    isVideoLoading,
+    handleTogglePlay,
+    seekRelative,
+    showGestureFeedback,
+  ]);
+
   // Hardware remote key event listener
   useTVEventHandler((evt: HWEvent) => {
     if (!visible || !evt || !evt.eventType) {
@@ -487,6 +578,18 @@ export const VideoPlayerView = ({
         </View>
       )}
 
+      {/* 3b. Transient gesture control confirmation HUD */}
+      {gestureFeedback && (
+        <View
+          style={styles.gestureFeedbackWrapper}
+          pointerEvents="none"
+          testID="gesture-feedback-toast">
+          <View style={styles.gestureFeedbackBadge}>
+            <Text style={styles.gestureFeedbackText}>{gestureFeedback}</Text>
+          </View>
+        </View>
+      )}
+
       {/* 4. Controls & HUD Overlays (disappear after 5s or on tap to view video full screen) */}
       {controlsVisible && (
         <>
@@ -494,8 +597,11 @@ export const VideoPlayerView = ({
           <View style={styles.topVignette} pointerEvents="none" />
           <View style={styles.bottomVignette} pointerEvents="none" />
 
-          {/* Live Room Awareness Gesture Reaction Overlay */}
-          <GestureReactionOverlay onOpenRecap={() => onRoomRecap(item)} />
+          {/* Live Room Awareness Gesture Reaction Overlay (control gestures handled separately) */}
+          <GestureReactionOverlay
+            hiddenGestures={PLAYBACK_CONTROL_GESTURES}
+            onOpenRecap={() => onRoomRecap(item)}
+          />
 
           {/* Top Navigation & Info HUD */}
           <View style={styles.topHeader}>
@@ -564,6 +670,35 @@ export const VideoPlayerView = ({
                     : 'AMBIENT SYNC ON'}
                 </Text>
               </View>
+
+              {/* Gesture Control On/Off Toggle (starts/stops the real webcam CV pipeline) */}
+              <Pressable
+                style={[
+                  styles.visionToggle,
+                  roomState.visionEnabled && styles.visionToggleOn,
+                  focusedControl === 'gesture' && styles.visionToggleFocused,
+                ]}
+                onFocus={() => {
+                  resetHideTimer();
+                  setFocusedControl('gesture');
+                }}
+                onPress={() => sendVisionCommand(!roomState.visionEnabled)}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  roomState.visionEnabled
+                    ? 'Turn off gesture control'
+                    : 'Turn on gesture control'
+                }
+                testID="btn-player-gesture-toggle">
+                <Text style={styles.visionToggleIcon}>🎥</Text>
+                <Text
+                  style={[
+                    styles.visionToggleText,
+                    roomState.visionEnabled && styles.visionToggleTextOn,
+                  ]}>
+                  {roomState.visionEnabled ? 'GESTURES ON' : 'GESTURES OFF'}
+                </Text>
+              </Pressable>
             </TVFocusGuideView>
           </View>
 
@@ -699,6 +834,28 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginTop: 16,
+    letterSpacing: 0.5,
+  },
+  gestureFeedbackWrapper: {
+    position: 'absolute',
+    top: 120,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 40,
+  },
+  gestureFeedbackBadge: {
+    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+    paddingHorizontal: 26,
+    paddingVertical: 12,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: colors.accentGold,
+  },
+  gestureFeedbackText: {
+    color: '#F8FAFC',
+    fontSize: 18,
+    fontWeight: '800',
     letterSpacing: 0.5,
   },
   topVignette: {
@@ -860,6 +1017,38 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  visionToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.35)',
+  },
+  visionToggleOn: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderColor: 'rgba(16, 185, 129, 0.6)',
+  },
+  visionToggleFocused: {
+    borderColor: colors.accentGold,
+    transform: [{scale: 1.05}],
+  },
+  visionToggleIcon: {
+    fontSize: 14,
+    marginRight: 8,
+  },
+  visionToggleText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  visionToggleTextOn: {
+    color: '#6EE7B7',
   },
   pausedIndicator: {
     ...StyleSheet.absoluteFillObject,

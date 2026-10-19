@@ -20,6 +20,7 @@ const WebSocket = require('ws');
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 
 // Parse CLI arguments or environment variables
 const args = process.argv.slice(2);
@@ -41,6 +42,128 @@ function getLanAddresses() {
     }
   }
   return addresses;
+}
+
+// ---------------------------------------------------------------------------
+// Vision sensor (webcam + MediaPipe CV) process lifecycle
+// ---------------------------------------------------------------------------
+let sensorProcess = null;
+
+function getSensorPython() {
+  const venvPython = path.join(__dirname, '..', '.venv', 'bin', 'python');
+  if (fs.existsSync(venvPython)) {
+    return venvPython;
+  }
+  return process.env.PYTHON || 'python3';
+}
+
+function findSensorPid() {
+  try {
+    for (const entry of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(entry)) {
+        continue;
+      }
+      try {
+        const parts = fs
+          .readFileSync(`/proc/${entry}/cmdline`, 'utf8')
+          .split('\0')
+          .filter(Boolean);
+        if (parts.length < 2) {
+          continue;
+        }
+        const exe = path.basename(parts[0]);
+        const isPython = /python/i.test(exe);
+        const runsScript = parts.slice(1).some((arg) => arg.endsWith('webcam_sensor.py'));
+        if (isPython && runsScript) {
+          return parseInt(entry, 10);
+        }
+      } catch (_e) {
+        // Process vanished between listing and read
+      }
+    }
+  } catch (_e) {
+    // /proc unavailable (non-Linux host)
+  }
+  return null;
+}
+
+function isSensorRunning() {
+  if (sensorProcess && sensorProcess.exitCode === null && !sensorProcess.killed) {
+    return true;
+  }
+  // Also report sensors started outside the server (e.g. manually from the CLI)
+  return findSensorPid() !== null;
+}
+
+function broadcastVisionStatus() {
+  broadcast({
+    type: 'vision_status',
+    enabled: isSensorRunning(),
+    timestamp: Date.now(),
+  });
+}
+
+function startSensor() {
+  if (isSensorRunning()) {
+    return { started: false, alreadyRunning: true };
+  }
+  const python = getSensorPython();
+  const script = path.join(__dirname, 'webcam_sensor.py');
+  console.log(`[VISION] Starting webcam sensor: ${python} ${script}`);
+
+  sensorProcess = spawn(python, [script], {
+    cwd: path.join(__dirname, '..'),
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: process.env,
+  });
+
+  sensorProcess.stdout.on('data', (chunk) => process.stdout.write(`[VISION] ${chunk}`));
+  sensorProcess.stderr.on('data', (chunk) => process.stderr.write(`[VISION:ERR] ${chunk}`));
+  sensorProcess.on('error', (err) => {
+    console.error(`[VISION] Failed to start sensor: ${err.message}`);
+    sensorProcess = null;
+    broadcastVisionStatus();
+  });
+  sensorProcess.on('exit', (code, signal) => {
+    console.log(`[VISION] Sensor exited (code=${code}, signal=${signal || 'none'})`);
+    sensorProcess = null;
+    broadcastVisionStatus();
+  });
+
+  broadcastVisionStatus();
+  return { started: true, alreadyRunning: false };
+}
+
+function stopSensor() {
+  const owned = sensorProcess && sensorProcess.exitCode === null && !sensorProcess.killed;
+  const pid = owned ? sensorProcess.pid : findSensorPid();
+  if (!pid) {
+    return { stopped: false, alreadyRunning: false };
+  }
+
+  console.log(`[VISION] Stopping webcam sensor (pid=${pid})...`);
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (err) {
+    console.warn(`[VISION] Failed to signal sensor: ${err.message}`);
+  }
+  // Force-kill if the sensor (e.g. blocked on stdin) does not exit promptly
+  const forceTimer = setTimeout(() => {
+    const stillAlive = owned
+      ? sensorProcess && sensorProcess.exitCode === null
+      : findSensorPid() === pid;
+    if (stillAlive) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch (_e) {
+        // Process already gone
+      }
+    }
+  }, 2000);
+  if (forceTimer.unref) {
+    forceTimer.unref();
+  }
+  return { stopped: true };
 }
 
 let latestFrameBuffer = null;
@@ -69,9 +192,41 @@ const server = http.createServer((req, res) => {
       service: 'LivingFrame-Laptop-Test-Server',
       connectedClients: wss.clients.size,
       hasCameraFeed: latestFrameBuffer !== null,
+      visionRunning: isSensorRunning(),
       telemetry: latestSensorTelemetry,
       timestamp: Date.now(),
     }));
+    return;
+  }
+
+  // Vision sensor lifecycle control (starts/stops the real webcam + MediaPipe pipeline)
+  if (url.startsWith('/vision/')) {
+    if (url === '/vision/status') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ action: 'status', running: isSensorRunning(), timestamp: Date.now() }));
+      return;
+    }
+    let action;
+    if (url === '/vision/start') {
+      action = 'start';
+      startSensor();
+    } else if (url === '/vision/stop') {
+      action = 'stop';
+      stopSensor();
+    } else if (url === '/vision/toggle') {
+      action = 'toggle';
+      if (isSensorRunning()) {
+        stopSensor();
+      } else {
+        startSensor();
+      }
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unknown vision endpoint' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify({ action, running: isSensorRunning(), timestamp: Date.now() }));
     return;
   }
 
@@ -344,7 +499,9 @@ const server = http.createServer((req, res) => {
   <div class="footer">
     <span>Privacy Mode: 100% Local Inference (Zero cloud streaming)</span>
     <div style="display: flex; gap: 8px;">
-      <button class="btn-manual" onclick="fetch('/gesture/open_palm').then(r=>r.json()).then(d=>console.log(d))">✋ Open Palm</button>
+      <button class="btn-manual" onclick="fetch('/gesture/hand_raised').then(r=>r.json()).then(d=>console.log(d))">✋ Hand Raised</button>
+      <button class="btn-manual" onclick="fetch('/gesture/swipe_left').then(r=>r.json()).then(d=>console.log(d))">⏪ Swipe Left</button>
+      <button class="btn-manual" onclick="fetch('/gesture/swipe_right').then(r=>r.json()).then(d=>console.log(d))">⏩ Swipe Right</button>
       <button class="btn-manual" onclick="fetch('/gesture/thumbs_up').then(r=>r.json()).then(d=>console.log(d))">👍 Thumbs Up</button>
       <button class="btn-manual" onclick="fetch('/gesture/closed_fist').then(r=>r.json()).then(d=>console.log(d))">✊ Closed Fist</button>
     </div>
@@ -374,7 +531,7 @@ const server = http.createServer((req, res) => {
         metricFps.innerText = (data.fps || 10).toFixed(1) + ' fps';
         
         if (data.activeGesture && data.activeGesture !== 'None') {
-          const emojiMap = { open_palm: '✋', hand_raised: '✋', thumbs_up: '👍', closed_fist: '✊', point_to_screen: '👆', victory: '✌️' };
+          const emojiMap = { open_palm: '✋', hand_raised: '✋', thumbs_up: '👍', closed_fist: '✊', point_to_screen: '👆', victory: '✌️', swipe_left: '⏪', swipe_right: '⏩' };
           const emoji = emojiMap[data.activeGesture] || '✋';
           const label = data.activeGesture.replace(/_/g, ' ').toUpperCase();
           metricGesture.innerText = emoji + ' ' + label;
@@ -568,10 +725,33 @@ wss.on('connection', (ws, req) => {
   ws.send(JSON.stringify(welcomePayload));
   console.log(`[SERVER SEND] Welcome event sent to client at ${remoteAddress}:${remotePort}`);
 
+  // Inform the freshly connected client of the current vision-control state
+  ws.send(JSON.stringify({
+    type: 'vision_status',
+    enabled: isSensorRunning(),
+    timestamp: Date.now(),
+  }));
+
   ws.on('message', (data) => {
     try {
       const parsed = JSON.parse(data.toString());
       console.log(`[CLIENT MESSAGE] Received from ${remoteAddress}:`, parsed);
+
+      // TV app toggling gesture control -> start/stop the real vision pipeline
+      if (parsed.type === 'vision_control') {
+        console.log(`[VISION] Command from TV client: enabled=${!!parsed.enabled}`);
+        if (parsed.enabled) {
+          startSensor();
+        } else {
+          stopSensor();
+        }
+        ws.send(JSON.stringify({
+          type: 'vision_status',
+          enabled: isSensorRunning(),
+          timestamp: Date.now(),
+        }));
+        return;
+      }
 
       // Rebroadcast sensor gestures / room events to other connected clients (TV app)
       if (parsed.type && parsed.type !== 'app_connected') {
@@ -608,5 +788,20 @@ server.listen(PORT, HOST, () => {
   console.log(`  curl http://localhost:${PORT}/trigger?message=CustomMessage`);
   console.log('To trigger a hand-raised gesture event:');
   console.log(`  curl http://localhost:${PORT}/gesture/hand_raised`);
+  console.log('To toggle the webcam AI vision sensor (gesture control):');
+  console.log(`  curl http://localhost:${PORT}/vision/start   # start`);
+  console.log(`  curl http://localhost:${PORT}/vision/stop    # stop`);
   console.log('========================================================\n');
 });
+
+// Ensure the spawned vision sensor is not orphaned when the server stops
+function shutdownServer() {
+  if (isSensorRunning()) {
+    stopSensor();
+  }
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 2500);
+}
+
+process.on('SIGINT', shutdownServer);
+process.on('SIGTERM', shutdownServer);

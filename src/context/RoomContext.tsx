@@ -19,6 +19,7 @@ interface RoomContextValue {
   toggleSensorStatus: () => void;
   reconnectServer: () => void;
   dismissGesture: () => void;
+  sendVisionCommand: (enabled: boolean) => void;
 }
 
 const defaultRoomState: RoomState = {
@@ -32,6 +33,7 @@ const defaultRoomState: RoomState = {
   lastTestTimestamp: null,
   activeGesture: null,
   gestureTimestamp: null,
+  visionEnabled: false,
 };
 
 const RoomContext = createContext<RoomContextValue>({
@@ -40,6 +42,7 @@ const RoomContext = createContext<RoomContextValue>({
   toggleSensorStatus: () => {},
   reconnectServer: () => {},
   dismissGesture: () => {},
+  sendVisionCommand: () => {},
 });
 
 export const RoomProvider = ({children}: {children: ReactNode}) => {
@@ -205,6 +208,12 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
                 payload: parsed.payload || {},
               },
             }));
+          } else if (parsed.type === 'vision_status') {
+            console.log(`[LivingFrame WS] VISION STATUS: enabled=${!!parsed.enabled}`);
+            setRoomState((prev) => ({
+              ...prev,
+              visionEnabled: !!parsed.enabled,
+            }));
           }
         } catch (err) {
           console.warn('[LivingFrame WS] Failed to parse message JSON:', err);
@@ -281,6 +290,21 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
     }));
   }, []);
 
+  const sendVisionCommand = useCallback((enabled: boolean) => {
+    const ws = wsRef.current;
+    const openState = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
+    if (ws && ws.readyState === openState) {
+      try {
+        ws.send(JSON.stringify({type: 'vision_control', enabled}));
+        console.log(`[LivingFrame WS] Sent vision_control enabled=${enabled}`);
+      } catch (err) {
+        console.warn('[LivingFrame WS] Failed to send vision_control:', err);
+      }
+    } else {
+      console.warn('[LivingFrame WS] Cannot send vision_control: socket not open');
+    }
+  }, []);
+
   const triggerMockEvent = (event: Partial<RoomEvent>) => {
     const fullEvent: RoomEvent = {
       id: `evt-${Date.now()}`,
@@ -304,7 +328,14 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
 
   return (
     <RoomContext.Provider
-      value={{roomState, triggerMockEvent, toggleSensorStatus, reconnectServer, dismissGesture}}>
+      value={{
+        roomState,
+        triggerMockEvent,
+        toggleSensorStatus,
+        reconnectServer,
+        dismissGesture,
+        sendVisionCommand,
+      }}>
       {children}
     </RoomContext.Provider>
   );

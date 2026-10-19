@@ -20,6 +20,8 @@ export type RoomGestureType =
   | 'thumbs_up'
   | 'point_to_screen'
   | 'victory'
+  | 'swipe_left'
+  | 'swipe_right'
   | 'none';
 
 export interface RoomEvent {
@@ -30,7 +32,8 @@ export interface RoomEvent {
     | 'gesture_detected'
     | 'recap_requested'
     | 'connectivity_test'
-    | 'play_video';
+    | 'play_video'
+    | 'vision_status';
   timestamp: number;
   payload: {
     viewerCount?: number;
@@ -52,4 +55,5 @@ export interface RoomState {
   lastTestTimestamp?: number | null;
   activeGesture?: RoomGestureType | null;
   gestureTimestamp?: number | null;
+  visionEnabled: boolean;
 }

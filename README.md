@@ -154,12 +154,26 @@ npm start
 
 ---
 
-### Optional Step 4: Laptop Camera AI Vision Sensor (Port 8080 feed)
-If you want live webcam gesture detection and viewer tracking to feed into the TV app:
+### Optional Step 4: Laptop Camera AI Vision Sensor (Gesture Control)
+The webcam + MediaPipe pipeline can be launched either from the TV or from the CLI:
+
+**From the TV (recommended):** open any video and toggle the **🎥 GESTURES OFF / ON** button in the
+player header. Turning it **ON** starts the real sensor process (and pops up the native camera
+preview window on the laptop); turning it **OFF** stops the process and releases the camera. The
+button reflects the live state reported by the server.
+
+**From the CLI:**
 ```bash
 python3 scripts/webcam_sensor.py
 ```
-*(Web camera feed preview is viewable in your browser at `http://localhost:8080/preview`)*.
+*(Live camera feed + landmarks are also viewable in your browser at `http://localhost:8080/preview`).*
+
+**From the server API:**
+```bash
+curl http://localhost:8080/vision/start   # start the webcam sensor
+curl http://localhost:8080/vision/stop    # stop the webcam sensor
+curl http://localhost:8080/vision/status  # current running state
+```
 
 ---
 
@@ -182,7 +196,11 @@ curl -s "http://localhost:8080/trigger?type=play_video&itemId=behind-the-screams
 # 4. Trigger simulated hand-raised room gesture
 curl -s "http://localhost:8080/gesture/hand_raised"
 
-# 5. Run automated tests (low memory mode)
+# 5. Start / stop the real webcam gesture-control sensor
+curl -s "http://localhost:8080/vision/start"
+curl -s "http://localhost:8080/vision/stop"
+
+# 6. Run automated tests (low memory mode)
 npm test -- --runInBand
 ```
 
@@ -211,6 +229,9 @@ npm test -- --runInBand
 | **Arrow Right / Fast-Forward** | Fast-Forward 10 seconds |
 | **Button: Restart (↺)** | Resets video to `00:00` and resumes playback |
 | **Button: Room Context (⚡)** | Opens live ambient room context recap overlay |
+| **Button: Gesture Control (🎥 GESTURES OFF/ON)** | Starts / stops the real webcam + MediaPipe sensor. When ON, hand gestures control playback |
+| **Gesture: Raise Hand (✋)** | *(gesture control ON)* Toggles Play / Pause |
+| **Gesture: Swipe Left / Right (⏪ ⏩)** | *(gesture control ON)* Seek back / forward 5 seconds |
 | **Button: Back (←)** / **ESC** | Exits video player and returns to browse screen |
 
 ---

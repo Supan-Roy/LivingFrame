@@ -6,7 +6,8 @@ Privacy-preserving local vision sensor that detects hand gestures
 using Google MediaPipe ML and dispatches real-time events to the local WebSocket server.
 
 Features:
-- Primary Engine: Pretrained MediaPipe Gesture Recognizer (Open Palm, Closed Fist, Thumbs Up)
+- Primary Engine: Pretrained MediaPipe Gesture Recognizer (Hand Raised, Closed Fist, Thumbs Up)
+- Playback Control: Open palm (hand raise) toggles pause/play; horizontal swipes seek +/- 5s
 - Fallback Engine: Lightweight heuristic YCbCr skin-tone detector (--engine heuristic)
 - Zero Cloud/Streaming: Raw video never leaves memory; 100% on-device inference
 - Dual Visual Previews: Native desktop popup window + live web dashboard at /camera
@@ -51,6 +52,7 @@ import urllib.request
 import urllib.error
 import threading
 import queue
+from collections import deque
 from PIL import Image
 
 # Global parameters
@@ -69,13 +71,22 @@ HAND_CONNECTIONS = [
 ]
 
 # Supported Gesture Mappings (MediaPipe category name -> room gesture payload)
+# NOTE: Open_Palm is the physical "hand raise" used to toggle video playback.
 GESTURE_MAP = {
-    'Open_Palm': ('open_palm', 'Open Palm Detected', '✋'),
+    'Open_Palm': ('hand_raised', 'Hand Raised Detected', '✋'),
     'Closed_Fist': ('closed_fist', 'Closed Fist Detected', '✊'),
     'Thumb_Up': ('thumbs_up', 'Thumbs Up Detected', '👍'),
     'Pointing_Up': ('point_to_screen', 'Pointing Detected', '👆'),
     'Victory': ('victory', 'Victory Detected', '✌️'),
 }
+
+# Horizontal swipe gesture tuning (normalized frame coordinates, 0..1)
+SWIPE_WINDOW_SEC = 0.55       # Time window over which motion is measured
+SWIPE_MIN_FRAMES = 3          # Minimum tracked samples before a swipe can fire
+SWIPE_DX_THRESHOLD = 0.22     # Minimum horizontal travel (fraction of frame width)
+SWIPE_DOMINANCE_RATIO = 1.5   # Horizontal motion must exceed vertical by this factor
+SWIPE_COOLDOWN_SEC = 1.2      # Debounce between consecutive swipe dispatches
+SWIPE_PALM_LANDMARK = 9       # Middle-finger MCP: stable palm-center proxy
 
 
 class FrameUploader(threading.Thread):
@@ -146,6 +157,10 @@ class WebcamSensor:
         self.cooldown_seconds = 3.0
         self.min_consecutive_frames = 3
 
+        # Swipe (seek) tracking state
+        self.swipe_history = deque(maxlen=40)
+        self.last_swipe_time = 0.0
+
         # Heuristic parameters (for fallback mode)
         self.upper_zone_fraction = 0.35
         self.skin_delta_threshold = 500
@@ -204,6 +219,39 @@ class WebcamSensor:
             print(f"⚠️ [EVENT ERROR] {e}")
             return False
 
+    def _detect_swipe(self, results, now):
+        """Track horizontal palm motion and return 'swipe_left'/'swipe_right' when detected."""
+        if not results.hand_landmarks:
+            # No hand in frame: drop stale motion history
+            self.swipe_history.clear()
+            return None
+
+        palm = results.hand_landmarks[0][SWIPE_PALM_LANDMARK]
+        self.swipe_history.append((now, palm.x, palm.y))
+
+        # Retain only samples inside the measurement window
+        while self.swipe_history and (now - self.swipe_history[0][0]) > SWIPE_WINDOW_SEC:
+            self.swipe_history.popleft()
+
+        if len(self.swipe_history) < SWIPE_MIN_FRAMES:
+            return None
+        if (now - self.last_swipe_time) < SWIPE_COOLDOWN_SEC:
+            return None
+
+        start_t, start_x, start_y = self.swipe_history[0]
+        span = now - start_t
+        if span <= 0:
+            return None
+
+        dx = palm.x - start_x
+        dy = palm.y - start_y
+
+        if abs(dx) >= SWIPE_DX_THRESHOLD and abs(dx) > abs(dy) * SWIPE_DOMINANCE_RATIO:
+            self.last_swipe_time = now
+            self.swipe_history.clear()
+            return 'swipe_right' if dx > 0 else 'swipe_left'
+        return None
+
     def run_manual_mode(self):
         """Interactive manual trigger fallback mode."""
         print("========================================================")
@@ -214,7 +262,9 @@ class WebcamSensor:
         print("  [1] Open Palm ✋ (open_palm)")
         print("  [2] Thumbs Up 👍 (thumbs_up)")
         print("  [3] Closed Fist ✊ (closed_fist)")
-        print("  [4] Hand Raised ✋ (hand_raised)")
+        print("  [4] Hand Raised ✋ (hand_raised) -> toggles pause/play")
+        print("  [5] Swipe Left ⏪ (swipe_left) -> seek back 5s")
+        print("  [6] Swipe Right ⏩ (swipe_right) -> seek forward 5s")
         print("  [q] Quit")
         print("--------------------------------------------------------")
 
@@ -223,6 +273,8 @@ class WebcamSensor:
             '2': ('thumbs_up', 0.99, 'Thumbs Up Detected'),
             '3': ('closed_fist', 0.95, 'Closed Fist Detected'),
             '4': ('hand_raised', 1.0, 'Hand Raised Detected'),
+            '5': ('swipe_left', 0.97, 'Swipe Left Detected'),
+            '6': ('swipe_right', 0.97, 'Swipe Right Detected'),
         }
 
         while self.running:
@@ -237,7 +289,7 @@ class WebcamSensor:
                     # Default enter key sends open_palm
                     self.send_event(gesture='open_palm', confidence=0.95, message='Open Palm Detected')
                 else:
-                    print("Invalid selection. Choose 1, 2, 3, 4, or q.")
+                    print("Invalid selection. Choose 1-6, or q.")
             except (EOFError, KeyboardInterrupt):
                 break
 
@@ -247,14 +299,15 @@ class WebcamSensor:
         print("   LivingFrame Simulation Sensor Mode")
         print("========================================================")
         print(f"Target Server: {self.server_url}")
-        print("Cycling gestures every 6 seconds: Open Palm -> Thumbs Up -> Closed Fist")
+        print("Cycling playback-control gestures every 6 seconds: Hand Raised -> Swipe Right -> Hand Raised -> Swipe Left")
         print("Press Ctrl+C to stop.")
         print("--------------------------------------------------------")
 
         gestures = [
-            ('open_palm', 0.96, 'Open Palm Detected'),
-            ('thumbs_up', 0.98, 'Thumbs Up Detected'),
-            ('closed_fist', 0.92, 'Closed Fist Detected'),
+            ('hand_raised', 0.96, 'Hand Raised Detected'),
+            ('swipe_right', 0.97, 'Swipe Right Detected'),
+            ('hand_raised', 0.96, 'Hand Raised Detected'),
+            ('swipe_left', 0.97, 'Swipe Left Detected'),
         ]
         idx = 0
 
@@ -516,14 +569,16 @@ class WebcamSensor:
         print(f"Video Device   : {self.device}")
         print(f"Resolution     : {width}x{height} @ 10fps (in-memory)")
         print(f"Min Confidence : {int(self.min_confidence * 100)}%")
-        print(f"Supported ML   : Open Palm ✋ | Thumbs Up 👍 | Closed Fist ✊")
+        print(f"Supported ML   : Hand Raised ✋ | Thumbs Up 👍 | Closed Fist ✊ | Swipe ⏪⏩")
         print(f"Desktop Window : {'ENABLED (Native Popup on Desktop)' if preview_window else 'DISABLED (Headless)'}")
         print(f"Web Dashboard  : {self.server_url}/camera (Live video + landmarks)")
         print(f"Privacy Mode   : 100% Local Inference (Zero cloud/streaming)")
         print("--------------------------------------------------------")
+        print("Playback Control:")
+        print("  - Raise an open palm ✋ to toggle PAUSE / PLAY on the TV.")
+        print("  - Swipe your hand ⏪ left to seek back 5s, ⏩ right to seek forward 5s.")
         print("Instructions:")
         print("  - Sit facing the laptop camera naturally.")
-        print("  - Perform an Open Palm ✋, Thumbs Up 👍, or Closed Fist ✊.")
         print("  - Hand landmarks and skeletons will be highlighted in real time.")
         print("  - Watch the live camera window AND the Vega TV app react!")
         print("  - Press Ctrl+C to exit.")
@@ -614,6 +669,19 @@ class WebcamSensor:
                         if detected_category and detected_category != 'None':
                             label_text = f"{detected_category}: {int(detected_score * 100)}%"
                             cv2.putText(annotated_rgb, label_text, (x_min, max(14, y_min - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 255, 255), 1)
+
+                # Horizontal swipe detection -> seek back / forward control
+                swipe_gesture = self._detect_swipe(results, now)
+                if swipe_gesture:
+                    swipe_emoji = '⏩' if swipe_gesture == 'swipe_right' else '⏪'
+                    swipe_desc = 'Swipe Right Detected' if swipe_gesture == 'swipe_right' else 'Swipe Left Detected'
+                    print(f"\n{swipe_emoji} [ML SWIPE DETECTED] {swipe_desc}")
+                    self.send_event(
+                        gesture=swipe_gesture,
+                        confidence=0.9,
+                        handedness=detected_hand,
+                        message=f"{swipe_emoji} {swipe_desc}"
+                    )
 
                 # Gesture mapping and event debouncing
                 mapped_gesture, gesture_desc, gesture_emoji = None, None, None
