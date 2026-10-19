@@ -56,9 +56,28 @@ export const VideoPlayerView = ({
   const playbackStartWallRef = useRef<number | null>(null);
   const pausedOffsetRef = useRef<number>(0);
   const lastEndedTimeRef = useRef<number>(0);
+  const isInitializedRef = useRef<boolean>(false);
+  const isLoadedRef = useRef<boolean>(false);
   const {roomState} = useRoom();
 
   const targetSrc = item?.videoUrl || (item?.id ? `http://10.0.2.2:8080/videos/${item.id}.mp4` : '');
+
+  // Attach surface handle and load video exactly once when both player and surface are ready
+  const tryAttachAndLoad = useCallback(() => {
+    const player = playerRef.current;
+    const handle = surfaceHandleRef.current;
+    if (player && handle && isInitializedRef.current && !isLoadedRef.current) {
+      isLoadedRef.current = true;
+      console.info(`[LivingFrame Video] Fast attaching surface handle ${handle} & loading: ${targetSrc}`);
+      try {
+        player.setSurfaceHandle(handle);
+        player.src = targetSrc;
+        player.load();
+      } catch (e) {
+        console.warn('[LivingFrame Video] Error attaching surface or loading stream:', e);
+      }
+    }
+  }, [targetSrc]);
 
   // Auto-hide controls after 5 seconds of inactivity
   const resetHideTimer = useCallback(() => {
@@ -121,6 +140,8 @@ export const VideoPlayerView = ({
   // Manage VideoPlayer lifecycle
   useEffect(() => {
     isMountedRef.current = true;
+    isInitializedRef.current = false;
+    isLoadedRef.current = false;
     setIsVideoLoading(true);
     setCurrentTimeSec(0);
     playbackStartWallRef.current = null;
@@ -224,15 +245,11 @@ export const VideoPlayerView = ({
         player.addEventListener('error', onError);
         player.addEventListener('ended', onEnded);
 
-        player.autoplay = false;
+        player.autoplay = true;
         player.muted = true;
 
-        if (surfaceHandleRef.current) {
-          console.info(`[LivingFrame Video] Attaching surface handle ${surfaceHandleRef.current}`);
-          player.setSurfaceHandle(surfaceHandleRef.current);
-          player.src = targetSrc;
-          player.load();
-        }
+        isInitializedRef.current = true;
+        tryAttachAndLoad();
       })
       .catch(err => {
         console.error(`[LivingFrame Video] VideoPlayer initialize error: ${err}`);
@@ -240,6 +257,8 @@ export const VideoPlayerView = ({
 
     return () => {
       isMountedRef.current = false;
+      isInitializedRef.current = false;
+      isLoadedRef.current = false;
       console.info(`[LivingFrame Video] Tearing down VideoPlayer for item: ${item?.id}`);
       if (hideTimerRef.current) {
         clearTimeout(hideTimerRef.current);
@@ -262,23 +281,15 @@ export const VideoPlayerView = ({
       }
       playerRef.current = null;
     };
-  }, [item?.id, targetSrc, resetHideTimer, showControls]);
+  }, [item?.id, targetSrc, tryAttachAndLoad, resetHideTimer, showControls]);
 
   const handleSurfaceCreated = useCallback(
     (handle: string) => {
       console.info(`[LivingFrame Video] Event: onSurfaceViewCreated handle=${handle}`);
       surfaceHandleRef.current = handle;
-      if (playerRef.current) {
-        try {
-          playerRef.current.setSurfaceHandle(handle);
-          playerRef.current.src = targetSrc;
-          playerRef.current.load();
-        } catch (e) {
-          console.error(`[LivingFrame Video] Error in setSurfaceHandle/load: ${e}`);
-        }
-      }
+      tryAttachAndLoad();
     },
-    [targetSrc],
+    [tryAttachAndLoad],
   );
 
   const handleSurfaceDestroyed = useCallback((handle: string) => {
@@ -291,6 +302,7 @@ export const VideoPlayerView = ({
       }
     }
     surfaceHandleRef.current = null;
+    isLoadedRef.current = false;
   }, []);
 
   // Playback control functions
