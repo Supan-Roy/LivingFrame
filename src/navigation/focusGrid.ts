@@ -2,14 +2,20 @@ import type {RoomGestureType} from '../types/room';
 
 export type NavDirection = 'left' | 'right' | 'up' | 'down';
 
-/** Cell id for the universal (header) gesture on/off control: grid row 0, col 0. */
+/** Cell id for the universal (header) gesture on/off control. */
 export const HEADER_TOGGLE_ID = 'header-gesture-toggle';
 export const HERO_BUTTON_IDS = [
   'hero-btn-explore',
   'hero-btn-more-info',
   'hero-btn-room-recap',
 ] as const;
-export const HERO_ROW_INDEX = 1;
+/**
+ * Grid layout: row 0 = hero actions, rows 1.. = content rows.
+ *
+ * NOTE: the header gesture switch is deliberately NOT a grid cell — a gesture must
+ * never be able to activate the control that turns gestures (and the camera) off.
+ */
+export const HERO_ROW_INDEX = 0;
 
 export interface NavCell {
   id: string;

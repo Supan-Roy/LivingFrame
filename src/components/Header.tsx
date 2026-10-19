@@ -2,12 +2,10 @@ import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
-import {useNavFocus} from '../navigation/NavFocusContext';
 import {HEADER_TOGGLE_ID} from '../navigation/focusGrid';
 
 export const Header = () => {
   const {roomState, sendVisionCommand} = useRoom();
-  const navFocus = useNavFocus();
 
   return (
     <View style={styles.headerContainer}>
@@ -24,14 +22,12 @@ export const Header = () => {
         </View>
       </View>
 
-      {/* Universal gesture-control switch (starts/stops the real webcam sensor) */}
+      {/* Universal gesture-control switch (remote/touch only — never gesture-activated) */}
       <Pressable
-        ref={navFocus?.registerRef(HEADER_TOGGLE_ID)}
         style={[
           styles.gestureToggle,
           roomState.visionEnabled && styles.gestureToggleOn,
         ]}
-        onFocus={() => navFocus?.reportFocus({row: 0, col: 0})}
         onPress={() => sendVisionCommand(!roomState.visionEnabled)}
         accessibilityRole="button"
         accessibilityLabel={

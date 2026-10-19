@@ -24,11 +24,7 @@ import {AmbientRecapModal} from './components/AmbientRecapModal';
 import {VideoPlayerView} from './components/VideoPlayerView';
 import {NavFocusProvider, useNavRegistry} from './navigation/NavFocusContext';
 import {useGestureNavigation} from './navigation/useGestureNavigation';
-import {
-  HEADER_TOGGLE_ID,
-  HERO_BUTTON_IDS,
-  HERO_ROW_INDEX,
-} from './navigation/focusGrid';
+import {HERO_BUTTON_IDS, HERO_ROW_INDEX} from './navigation/focusGrid';
 import type {NavCell, NavGrid, NavPosition} from './navigation/focusGrid';
 import {colors} from './theme/theme';
 
@@ -43,7 +39,7 @@ export const LivingFrameHome = () => {
   const [detailsModalItem, setDetailsModalItem] = useState<MediaItem | null>(null);
   const [recapModalItem, setRecapModalItem] = useState<MediaItem | null>(null);
   const [playingItem, setPlayingItem] = useState<MediaItem | null>(null);
-  const {roomState, sendVisionCommand} = useRoom();
+  const {roomState} = useRoom();
   const nav = useNavRegistry();
 
   // Vertical scroll following: the native focus engine reveals the focused card inside
@@ -197,15 +193,9 @@ export const LivingFrameHome = () => {
 
   const currentScreen: 'browse' | 'player' = playingItem ? 'player' : 'browse';
 
-  // Focusable grid: row 0 = header gesture switch, row 1 = hero actions,
-  // rows 2..N = content rows. Ids match the components' registered refs.
+  // Focusable grid: row 0 = hero actions, rows 1.. = content rows. Ids match the
+  // components' registered refs. The header gesture switch is intentionally NOT here.
   const grid = useMemo<NavGrid>(() => {
-    const headerRow: NavCell[] = [
-      {
-        id: HEADER_TOGGLE_ID,
-        onActivate: () => sendVisionCommand(!roomState.visionEnabled),
-      },
-    ];
     const heroRow: NavCell[] = [
       {id: HERO_BUTTON_IDS[0], onActivate: () => handleExplore(featuredItem)},
       {id: HERO_BUTTON_IDS[1], onActivate: () => handleMoreInfo(featuredItem)},
@@ -217,12 +207,10 @@ export const LivingFrameHome = () => {
         onActivate: () => handleCardSelect(item),
       })),
     );
-    return [headerRow, heroRow, ...contentRows];
+    return [heroRow, ...contentRows];
   }, [
     categories,
     featuredItem,
-    roomState.visionEnabled,
-    sendVisionCommand,
     handleExplore,
     handleMoreInfo,
     handleRoomRecap,
