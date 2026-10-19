@@ -89,8 +89,13 @@ SWIPE_DX_THRESHOLD = 0.12     # Minimum horizontal travel (fraction of frame wid
 SWIPE_DY_THRESHOLD = 0.14     # Minimum vertical travel (fraction of frame height; 4:3 frame)
 SWIPE_DOMINANCE_RATIO = 1.4   # Swipe axis must exceed the other by this factor
 SWIPE_COOLDOWN_SEC = 0.7      # Debounce between consecutive swipe dispatches
-SWIPE_SUPPRESS_SEC = 0.7      # Suppress gesture toggles right after a swipe dispatch
+SWIPE_SUPPRESS_SEC = 1.2      # Suppress gesture toggles right after a swipe dispatch
 SWIPE_PALM_LANDMARK = 9       # Middle-finger MCP: stable palm-center proxy
+
+# Motion gating: a pose gesture (hand raise, fist, ...) only counts when the hand is
+# held reasonably still — otherwise waving an open palm would fire "select" mid-swipe.
+MOTION_WINDOW_SEC = 0.25      # Window used to decide whether the hand is moving
+MOTION_MOVE_THRESHOLD = 0.05  # Palm travel (normalized) within the window that = moving
 
 # Swipe payload (emoji, human description) keyed by gesture name
 SWIPE_LABELS = {
@@ -173,6 +178,7 @@ class WebcamSensor:
         self.swipe_history = deque(maxlen=40)
         self.last_swipe_time = 0.0
         self.swipe_suppress_until = 0.0
+        self.motion_history = deque(maxlen=30)
         self.swipe_debug = os.environ.get('LIVINGFRAME_SWIPE_DEBUG') == '1'
 
         # Heuristic parameters (for fallback mode)
@@ -280,6 +286,22 @@ class WebcamSensor:
             # Image y grows downward: positive dy means the hand moved down
             return 'swipe_down' if dy > 0 else 'swipe_up'
         return None
+
+    def _track_motion(self, results, now):
+        """Record the palm position and report whether the hand is moving this frame."""
+        if results.hand_landmarks:
+            palm = results.hand_landmarks[0][SWIPE_PALM_LANDMARK]
+            self.motion_history.append((now, palm.x, palm.y))
+
+        while self.motion_history and (now - self.motion_history[0][0]) > MOTION_WINDOW_SEC:
+            self.motion_history.popleft()
+
+        if len(self.motion_history) < 2:
+            return False
+
+        _, start_x, start_y = self.motion_history[0]
+        _, end_x, end_y = self.motion_history[-1]
+        return max(abs(end_x - start_x), abs(end_y - start_y)) >= MOTION_MOVE_THRESHOLD
 
     def run_manual_mode(self):
         """Interactive manual trigger fallback mode."""
@@ -703,6 +725,8 @@ class WebcamSensor:
                             label_text = f"{detected_category}: {int(detected_score * 100)}%"
                             cv2.putText(annotated_rgb, label_text, (x_min, max(14, y_min - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 255, 255), 1)
 
+                hand_is_moving = self._track_motion(results, now)
+
                 # Swipe detection -> horizontal seek (player) / vertical navigation (home)
                 swipe_gesture = self._detect_swipe(results, now)
                 if swipe_gesture:
@@ -724,7 +748,12 @@ class WebcamSensor:
 
                 time_since_trigger = now - self.last_trigger_time
 
-                if mapped_gesture and detected_score >= self.min_confidence and now >= self.swipe_suppress_until:
+                if (
+                    mapped_gesture
+                    and detected_score >= self.min_confidence
+                    and now >= self.swipe_suppress_until
+                    and not hand_is_moving
+                ):
                     self.neutral_frames = 0
                     if self.last_candidate_gesture == mapped_gesture:
                         self.consecutive_hits += 1

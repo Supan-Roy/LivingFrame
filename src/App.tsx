@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useCallback, useMemo} from 'react';
+import React, {useState, useEffect, useCallback, useMemo, useRef} from 'react';
 import {
   StyleSheet,
   View,
@@ -6,6 +6,7 @@ import {
   ScrollView,
   BackHandler,
 } from 'react-native';
+import type {LayoutChangeEvent} from 'react-native';
 import {
   useTVEventHandler,
   useKeplerBackHandler,
@@ -23,8 +24,12 @@ import {AmbientRecapModal} from './components/AmbientRecapModal';
 import {VideoPlayerView} from './components/VideoPlayerView';
 import {NavFocusProvider, useNavRegistry} from './navigation/NavFocusContext';
 import {useGestureNavigation} from './navigation/useGestureNavigation';
-import {HEADER_TOGGLE_ID, HERO_BUTTON_IDS} from './navigation/focusGrid';
-import type {NavCell, NavGrid} from './navigation/focusGrid';
+import {
+  HEADER_TOGGLE_ID,
+  HERO_BUTTON_IDS,
+  HERO_ROW_INDEX,
+} from './navigation/focusGrid';
+import type {NavCell, NavGrid, NavPosition} from './navigation/focusGrid';
 import {colors} from './theme/theme';
 
 export const LivingFrameHome = () => {
@@ -40,6 +45,36 @@ export const LivingFrameHome = () => {
   const [playingItem, setPlayingItem] = useState<MediaItem | null>(null);
   const {roomState, sendVisionCommand} = useRoom();
   const nav = useNavRegistry();
+
+  // Vertical scroll following: the native focus engine reveals the focused card inside
+  // a row (horizontal), but does not scroll the outer page for us, so we track each
+  // row's offset and scroll the page when the focused row changes.
+  const scrollRef = useRef<ScrollView>(null);
+  const rowOffsetsRef = useRef<Map<number, number>>(new Map());
+  const lastScrolledRowRef = useRef<number>(HERO_ROW_INDEX);
+
+  const handleRowLayout = useCallback(
+    (row: number, event: LayoutChangeEvent) => {
+      rowOffsetsRef.current.set(row, event.nativeEvent.layout.y);
+    },
+    [],
+  );
+
+  const {reportFocus} = nav;
+  const handleReportFocus = useCallback(
+    (position: NavPosition) => {
+      reportFocus(position);
+      if (position.row === lastScrolledRowRef.current) {
+        return;
+      }
+      lastScrolledRowRef.current = position.row;
+      const y = rowOffsetsRef.current.get(position.row);
+      if (y !== undefined) {
+        scrollRef.current?.scrollTo({y: Math.max(0, y - 16), animated: true});
+      }
+    },
+    [reportFocus],
+  );
 
   // Listen to remote play_video commands from telemetry server / gestures
   useEffect(() => {
@@ -205,7 +240,7 @@ export const LivingFrameHome = () => {
   return (
     <NavFocusProvider
       registerRef={nav.registerRef}
-      reportFocus={nav.reportFocus}>
+      reportFocus={handleReportFocus}>
       <View style={styles.container}>
         {/* Browse Screen */}
         {currentScreen === 'browse' && (
@@ -217,29 +252,38 @@ export const LivingFrameHome = () => {
 
             {/* Main TV Vertical Content Flow */}
             <ScrollView
+              ref={scrollRef}
               style={styles.mainScroll}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.scrollContent}>
               {/* Dynamic Hero Section */}
-              <HeroBanner
-                item={featuredItem}
-                onExplore={handleExplore}
-                onMoreInfo={handleMoreInfo}
-                onRoomRecap={handleRoomRecap}
-              />
+              <View onLayout={event => handleRowLayout(HERO_ROW_INDEX, event)}>
+                <HeroBanner
+                  item={featuredItem}
+                  onExplore={handleExplore}
+                  onMoreInfo={handleMoreInfo}
+                  onRoomRecap={handleRoomRecap}
+                />
+              </View>
 
               {/* Content Rows */}
-              {categories.map((category, index) => (
-                <ContentRow
-                  key={category.id}
-                  category={category}
-                  rowIndex={index + 2}
-                  focusedItemId={focusedItemId}
-                  onItemFocus={handleCardFocus}
-                  onItemSelect={handleCardSelect}
-                  isFirstRow={index === 0}
-                />
-              ))}
+              {categories.map((category, index) => {
+                const rowIndex = index + HERO_ROW_INDEX + 1;
+                return (
+                  <View
+                    key={category.id}
+                    onLayout={event => handleRowLayout(rowIndex, event)}>
+                    <ContentRow
+                      category={category}
+                      rowIndex={rowIndex}
+                      focusedItemId={focusedItemId}
+                      onItemFocus={handleCardFocus}
+                      onItemSelect={handleCardSelect}
+                      isFirstRow={index === 0}
+                    />
+                  </View>
+                );
+              })}
             </ScrollView>
           </ImageBackground>
         )}
