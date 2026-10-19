@@ -1,21 +1,8 @@
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {colors} from '../theme/theme';
-import {useRoom} from '../context/RoomContext';
 
 export const Header = () => {
-  const {roomState} = useRoom();
-
-  const getStatusText = () => {
-    if (roomState.sensorStatus === 'active') {
-      return `ROOM SENSOR ACTIVE • ${roomState.viewersPresent} VIEWERS`;
-    }
-    if (roomState.sensorStatus === 'connecting') {
-      return 'CONNECTING TO SENSOR HUB...';
-    }
-    return 'SENSOR OFFLINE (RETRYING)';
-  };
-
   return (
     <View style={styles.headerContainer}>
       {/* Brand & Wordmark */}
@@ -28,32 +15,6 @@ export const Header = () => {
             LIVING<Text style={styles.wordmarkAccent}>FRAME</Text>
           </Text>
           <Text style={styles.wordmarkSub}>RESPONSIVE TV EXPERIENCE</Text>
-        </View>
-      </View>
-
-      {/* Right: Diagnostic Test Badge & Ambient Room Sensor Pill */}
-      <View style={styles.rightContainer}>
-        {roomState.lastTestMessage && (
-          <View style={styles.testBadge} testID="header-test-badge">
-            <Text style={styles.testBadgeIcon}>📡</Text>
-            <Text style={styles.testBadgeText} numberOfLines={1}>
-              {roomState.lastTestMessage}
-            </Text>
-          </View>
-        )}
-
-        <View style={styles.ambientPill} testID="header-room-pill">
-          <View
-            style={[
-              styles.sensorIndicatorDot,
-              roomState.sensorStatus === 'active'
-                ? styles.sensorActive
-                : roomState.sensorStatus === 'connecting'
-                ? styles.sensorStandby
-                : styles.sensorDisconnected,
-            ]}
-          />
-          <Text style={styles.ambientPillText}>{getStatusText()}</Text>
         </View>
       </View>
     </View>
@@ -108,61 +69,5 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     color: colors.textSecondary,
     marginTop: -2,
-  },
-  rightContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  testBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 229, 255, 0.15)',
-    borderWidth: 1,
-    borderColor: colors.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 16,
-    marginRight: 12,
-  },
-  testBadgeIcon: {
-    fontSize: 12,
-    marginRight: 6,
-  },
-  testBadgeText: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    color: colors.primary,
-    maxWidth: 220,
-  },
-  ambientPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(17, 24, 39, 0.75)',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  sensorIndicatorDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  sensorActive: {
-    backgroundColor: colors.accentEmerald,
-  },
-  sensorStandby: {
-    backgroundColor: colors.accentGold,
-  },
-  sensorDisconnected: {
-    backgroundColor: '#64748B',
-  },
-  ambientPillText: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    color: '#E2E8F0',
   },
 });

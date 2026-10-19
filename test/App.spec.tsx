@@ -61,10 +61,9 @@ describe('LivingFrame App', () => {
     jest.useRealTimers();
   });
 
-  it('renders the header brand and room sensor status', () => {
+  it('renders the header brand', () => {
     const screen = render(<App />);
     expect(screen.getByTestId('header-brand-title')).toBeTruthy();
-    expect(screen.getByTestId('header-room-pill')).toBeTruthy();
   });
 
   it('renders prominent hero action buttons', () => {

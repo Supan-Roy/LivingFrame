@@ -20,7 +20,6 @@ import {HeroBanner} from './components/HeroBanner';
 import {ContentRow} from './components/ContentRow';
 import {TitleDetailsModal} from './components/TitleDetailsModal';
 import {AmbientRecapModal} from './components/AmbientRecapModal';
-import {GestureReactionOverlay} from './components/GestureReactionOverlay';
 import {VideoPlayerView} from './components/VideoPlayerView';
 import {colors} from './theme/theme';
 
@@ -165,11 +164,8 @@ export const LivingFrameHome = () => {
         <ImageBackground
           source={require('./assets/background.png')}
           style={styles.container}>
-          {/* Top TV Header Bar with LivingFrame Wordmark & Ambient Sensor Status */}
+          {/* Top TV Header Bar with LivingFrame Wordmark */}
           <Header />
-
-          {/* Real-time Room Awareness Gesture Reaction Overlay */}
-          <GestureReactionOverlay onOpenRecap={() => setRecapModalItem(featuredItem)} />
 
           {/* Main TV Vertical Content Flow */}
           <ScrollView

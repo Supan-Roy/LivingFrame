@@ -666,23 +666,6 @@ export const VideoPlayerView = ({
                 </View>
               </View>
 
-              {/* Room Sensing Status Indicator */}
-              <View style={styles.ambientPill}>
-                <View
-                  style={[
-                    styles.ambientDot,
-                    roomState.sensorStatus === 'active' && styles.ambientDotActive,
-                  ]}
-                />
-                <Text style={styles.ambientPillText}>
-                  {roomState.activeGesture
-                    ? `ROOM: ${roomState.activeGesture.toUpperCase()}`
-                    : roomState.sensorStatus === 'active'
-                    ? 'ROOM SENSOR ACTIVE'
-                    : 'AMBIENT SYNC ON'}
-                </Text>
-              </View>
-
               {/* Gesture Control On/Off Toggle (starts/stops the real webcam CV pipeline) */}
               <Pressable
                 style={[
@@ -993,32 +976,6 @@ const styles = StyleSheet.create({
   streamBadgeText: {
     color: '#F8FAFC',
     fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  ambientPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(3, 7, 18, 0.8)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.35)',
-  },
-  ambientDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#64748B',
-    marginRight: 8,
-  },
-  ambientDotActive: {
-    backgroundColor: '#38BDF8',
-  },
-  ambientPillText: {
-    color: '#E0F2FE',
-    fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.5,
   },
