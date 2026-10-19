@@ -51,20 +51,84 @@ export const VideoPlayerView = ({
   const [durationSec, setDurationSec] = useState<number>(
     item?.durationSec && item.durationSec > 0 && item.durationSec <= 300
       ? item.durationSec
-      : 10,
+      : 10.0,
   );
   const [isVideoLoading, setIsVideoLoading] = useState<boolean>(true);
   const [focusedControl, setFocusedControl] = useState<
     'back' | 'play' | 'restart' | 'recap'
   >('play');
+  const [controlsVisible, setControlsVisible] = useState<boolean>(true);
 
   const playerRef = useRef<VideoPlayer | null>(null);
   const surfaceHandleRef = useRef<string | null>(null);
   const isPlayingRef = useRef<boolean>(true);
   const isMountedRef = useRef<boolean>(true);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const {roomState} = useRoom();
 
   const targetSrc = item?.videoUrl || (item?.id ? `http://10.0.2.2:8080/videos/${item.id}.mp4` : '');
+
+  // Auto-hide controls after 5 seconds of inactivity
+  const resetHideTimer = useCallback(() => {
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+    }
+    hideTimerRef.current = setTimeout(() => {
+      if (isMountedRef.current) {
+        setControlsVisible(false);
+      }
+    }, 5000);
+  }, []);
+
+  const showControls = useCallback(() => {
+    setControlsVisible(true);
+    resetHideTimer();
+  }, [resetHideTimer]);
+
+  const toggleControls = useCallback(() => {
+    setControlsVisible((prev) => {
+      const next = !prev;
+      if (next) {
+        resetHideTimer();
+      } else {
+        if (hideTimerRef.current) {
+          clearTimeout(hideTimerRef.current);
+          hideTimerRef.current = null;
+        }
+      }
+      return next;
+    });
+  }, [resetHideTimer]);
+
+  // Start 5-second auto-hide timer on mount or when video starts
+  useEffect(() => {
+    resetHideTimer();
+    return () => {
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+      }
+    };
+  }, [resetHideTimer]);
+
+  // High-precision clock polling for smooth and perfectly synced seek bar progression
+  useEffect(() => {
+    if (!isPlaying || isVideoLoading) {
+      return;
+    }
+    const interval = setInterval(() => {
+      if (playerRef.current && isMountedRef.current) {
+        const ct = playerRef.current.currentTime;
+        if (ct != null && !isNaN(ct) && ct >= 0) {
+          setCurrentTimeSec(ct);
+        }
+        const dur = playerRef.current.duration;
+        if (dur && !isNaN(dur) && dur > 0) {
+          setDurationSec(dur);
+        }
+      }
+    }, 100);
+    return () => clearInterval(interval);
+  }, [isPlaying, isVideoLoading]);
 
   // Manage VideoPlayer lifecycle
   useEffect(() => {
@@ -73,6 +137,7 @@ export const VideoPlayerView = ({
     setCurrentTimeSec(0);
     setIsPlaying(true);
     isPlayingRef.current = true;
+    setControlsVisible(true);
 
     sendDebugLog(`Creating new VideoPlayer instance for item: ${item?.id} src=${targetSrc}`);
     const player = new VideoPlayer();
@@ -82,7 +147,7 @@ export const VideoPlayerView = ({
       const dur = player.duration;
       sendDebugLog(`EVENT: loadedmetadata duration=${dur}`);
       if (dur && !isNaN(dur) && dur > 0) {
-        setDurationSec(Math.round(dur));
+        setDurationSec(dur);
       }
     };
 
@@ -102,19 +167,19 @@ export const VideoPlayerView = ({
         setIsPlaying(true);
         isPlayingRef.current = true;
         setIsVideoLoading(false);
+        resetHideTimer();
       }
     };
 
     const onTimeUpdate = () => {
       if (!isMountedRef.current) return;
       const ct = player.currentTime;
-      sendDebugLog(`EVENT: timeupdate ct=${ct}`);
       if (ct != null && !isNaN(ct)) {
-        setCurrentTimeSec(Math.floor(ct));
+        setCurrentTimeSec(ct);
       }
       const dur = player.duration;
       if (dur && !isNaN(dur) && dur > 0) {
-        setDurationSec(Math.round(dur));
+        setDurationSec(dur);
       }
       setIsVideoLoading(false);
     };
@@ -124,6 +189,7 @@ export const VideoPlayerView = ({
       if (isMountedRef.current) {
         setIsPlaying(false);
         isPlayingRef.current = false;
+        showControls();
       }
     };
 
@@ -132,11 +198,13 @@ export const VideoPlayerView = ({
       sendDebugLog(`EVENT: error code=${err?.code} msg=${err?.message}`);
       if (isMountedRef.current) {
         setIsVideoLoading(false);
+        showControls();
       }
     };
 
     const onEnded = () => {
       sendDebugLog('EVENT: ended -> looping');
+      setCurrentTimeSec(0);
       try {
         player.currentTime = 0;
         player.play().catch(() => {});
@@ -172,6 +240,9 @@ export const VideoPlayerView = ({
     return () => {
       isMountedRef.current = false;
       sendDebugLog(`Tearing down VideoPlayer for item: ${item?.id}`);
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+      }
       try {
         player.pause();
         if (surfaceHandleRef.current) {
@@ -190,7 +261,7 @@ export const VideoPlayerView = ({
       }
       playerRef.current = null;
     };
-  }, [item?.id, targetSrc]);
+  }, [item?.id, targetSrc, resetHideTimer, showControls]);
 
   const handleSurfaceCreated = useCallback(
     (handle: string) => {
@@ -223,6 +294,7 @@ export const VideoPlayerView = ({
 
   // Playback control functions
   const handlePlay = useCallback(() => {
+    resetHideTimer();
     if (playerRef.current) {
       try {
         playerRef.current.play().catch(e => sendDebugLog(`play error: ${e}`));
@@ -232,9 +304,10 @@ export const VideoPlayerView = ({
     }
     setIsPlaying(true);
     isPlayingRef.current = true;
-  }, []);
+  }, [resetHideTimer]);
 
   const handlePause = useCallback(() => {
+    resetHideTimer();
     if (isVideoLoading) {
       console.info('[LivingFrame Video] Ignoring pause while video is loading');
       return;
@@ -248,9 +321,10 @@ export const VideoPlayerView = ({
     }
     setIsPlaying(false);
     isPlayingRef.current = false;
-  }, [isVideoLoading]);
+  }, [isVideoLoading, resetHideTimer]);
 
   const handleTogglePlay = useCallback(() => {
+    resetHideTimer();
     if (isVideoLoading) {
       console.info('[LivingFrame Video] Ignoring toggle while video is loading');
       return;
@@ -260,9 +334,10 @@ export const VideoPlayerView = ({
     } else {
       handlePlay();
     }
-  }, [isPlaying, isVideoLoading, handlePause, handlePlay]);
+  }, [isPlaying, isVideoLoading, handlePause, handlePlay, resetHideTimer]);
 
   const handleRestart = useCallback(() => {
+    resetHideTimer();
     if (playerRef.current) {
       try {
         playerRef.current.currentTime = 0;
@@ -274,7 +349,7 @@ export const VideoPlayerView = ({
     setCurrentTimeSec(0);
     setIsPlaying(true);
     isPlayingRef.current = true;
-  }, []);
+  }, [resetHideTimer]);
 
   // Hardware remote key event listener
   useTVEventHandler((evt: HWEvent) => {
@@ -282,24 +357,34 @@ export const VideoPlayerView = ({
       return;
     }
     const eventType = evt.eventType.toLowerCase();
+
+    // If controls are hidden, any user key wakes up the controller and restarts the 5s timer
+    if (!controlsVisible) {
+      showControls();
+      return;
+    }
+
+    // Reset 5s countdown on every interaction while controls are visible
+    resetHideTimer();
+
     if (eventType === 'play' || eventType === 'media_play') {
       handlePlay();
     } else if (eventType === 'pause' || eventType === 'media_pause') {
       handlePause();
     } else if (eventType === 'rewind' || eventType === 'media_rewind') {
       if (playerRef.current) {
-        playerRef.current.currentTime = Math.max(
-          0,
-          (playerRef.current.currentTime || 0) - 10,
-        );
+        const newTime = Math.max(0, (playerRef.current.currentTime || 0) - 10);
+        playerRef.current.currentTime = newTime;
+        setCurrentTimeSec(newTime);
       }
     } else if (eventType === 'fastforward' || eventType === 'media_fast_forward') {
       if (playerRef.current) {
-        playerRef.current.currentTime = Math.min(
-          durationSec,
-          (playerRef.current.currentTime || 0) + 10,
-        );
+        const newTime = Math.min(durationSec, (playerRef.current.currentTime || 0) + 10);
+        playerRef.current.currentTime = newTime;
+        setCurrentTimeSec(newTime);
       }
+    } else if (eventType === 'menu') {
+      toggleControls();
     }
   });
 
@@ -308,8 +393,9 @@ export const VideoPlayerView = ({
   }
 
   const formatTime = (totalSeconds: number) => {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
+    const total = Math.max(0, Math.floor(totalSeconds));
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
     return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
@@ -320,7 +406,7 @@ export const VideoPlayerView = ({
 
   return (
     <View style={styles.playerContainer} testID="livingframe-videoplayer-view">
-      {/* 1. Hardware Accelerated Native Video rendered by Vega Media Engine */}
+      {/* 1. Hardware Accelerated Native Video rendered full screen */}
       <View
         style={[
           styles.surfaceWrapper,
@@ -344,7 +430,14 @@ export const VideoPlayerView = ({
         />
       </View>
 
-      {/* 2. Buffering / Loading Indicator */}
+      {/* 2. Full-Screen Backdrop: 1 click toggles controls, another hides and views video full screen */}
+      <Pressable
+        style={StyleSheet.absoluteFillObject}
+        onPress={toggleControls}
+        testID="btn-screen-toggle-controls"
+      />
+
+      {/* 3. Buffering / Loading Indicator */}
       {isVideoLoading && (
         <View style={styles.loadingOverlay} pointerEvents="none">
           <ActivityIndicator size="large" color={colors.accentGold} />
@@ -352,156 +445,178 @@ export const VideoPlayerView = ({
         </View>
       )}
 
-      {/* 3. Subtle Edge Vignettes for Navigation Legibility */}
-      <View style={styles.topVignette} pointerEvents="none" />
-      <View style={styles.bottomVignette} pointerEvents="none" />
+      {/* 4. Controls & HUD Overlays (disappear after 5s or on tap to view video full screen) */}
+      {controlsVisible && (
+        <>
+          {/* Subtle Edge Vignettes for Navigation Legibility */}
+          <View style={styles.topVignette} pointerEvents="none" />
+          <View style={styles.bottomVignette} pointerEvents="none" />
 
-      {/* 4. Live Room Awareness Gesture Reaction Overlay */}
-      <GestureReactionOverlay onOpenRecap={() => onRoomRecap(item)} />
+          {/* Live Room Awareness Gesture Reaction Overlay */}
+          <GestureReactionOverlay onOpenRecap={() => onRoomRecap(item)} />
 
-      {/* 5. Top Navigation & Info HUD */}
-      <View style={styles.topHeader}>
-        <TVFocusGuideView style={styles.headerRow}>
-          <Pressable
-            style={[
-              styles.hudButton,
-              focusedControl === 'back' && styles.hudButtonFocused,
-            ]}
-            onFocus={() => setFocusedControl('back')}
-            onPress={onClose}
-            accessibilityRole="button"
-            accessibilityLabel="Back to Browse"
-            testID="btn-player-back">
-            <Text style={styles.hudButtonIcon}>←</Text>
-            <Text style={styles.hudButtonText}>Back to Browse</Text>
-          </Pressable>
-
-          <View style={styles.titleGroup}>
-            <Text style={styles.playerTitle} numberOfLines={1}>
-              {item.title}
-            </Text>
-            <View style={styles.metaRow}>
-              <View style={styles.ratingBadge}>
-                <Text style={styles.ratingBadgeText}>{item.contentRating}</Text>
-              </View>
-              <Text style={styles.metaDot}>•</Text>
-              <Text style={styles.metaText}>{item.category}</Text>
-              <Text style={styles.metaDot}>•</Text>
-              <View
+          {/* Top Navigation & Info HUD */}
+          <View style={styles.topHeader}>
+            <TVFocusGuideView style={styles.headerRow}>
+              <Pressable
                 style={[
-                  styles.streamBadge,
-                  isPlaying ? styles.streamBadgePlaying : styles.streamBadgePaused,
-                ]}>
+                  styles.hudButton,
+                  focusedControl === 'back' && styles.hudButtonFocused,
+                ]}
+                onFocus={() => {
+                  resetHideTimer();
+                  setFocusedControl('back');
+                }}
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Back to Browse"
+                testID="btn-player-back">
+                <Text style={styles.hudButtonIcon}>←</Text>
+                <Text style={styles.hudButtonText}>Back to Browse</Text>
+              </Pressable>
+
+              <View style={styles.titleGroup}>
+                <Text style={styles.playerTitle} numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <View style={styles.metaRow}>
+                  <View style={styles.ratingBadge}>
+                    <Text style={styles.ratingBadgeText}>{item.contentRating}</Text>
+                  </View>
+                  <Text style={styles.metaDot}>•</Text>
+                  <Text style={styles.metaText}>{item.category}</Text>
+                  <Text style={styles.metaDot}>•</Text>
+                  <View
+                    style={[
+                      styles.streamBadge,
+                      isPlaying ? styles.streamBadgePlaying : styles.streamBadgePaused,
+                    ]}>
+                    <View
+                      style={[
+                        styles.streamDot,
+                        isPlaying ? styles.streamDotPlaying : styles.streamDotPaused,
+                      ]}
+                    />
+                    <Text style={styles.streamBadgeText}>
+                      {isPlaying ? 'PLAYING 1080p' : 'PAUSED'}
+                    </Text>
+                  </View>
+                  <Text style={styles.metaDot}>•</Text>
+                  <Text style={styles.metaEngineText}>Vega Media Engine</Text>
+                </View>
+              </View>
+
+              {/* Room Sensing Status Indicator */}
+              <View style={styles.ambientPill}>
                 <View
                   style={[
-                    styles.streamDot,
-                    isPlaying ? styles.streamDotPlaying : styles.streamDotPaused,
+                    styles.ambientDot,
+                    roomState.sensorStatus === 'active' && styles.ambientDotActive,
                   ]}
                 />
-                <Text style={styles.streamBadgeText}>
-                  {isPlaying ? 'PLAYING 1080p' : 'PAUSED'}
+                <Text style={styles.ambientPillText}>
+                  {roomState.activeGesture
+                    ? `ROOM: ${roomState.activeGesture.toUpperCase()}`
+                    : roomState.sensorStatus === 'active'
+                    ? 'ROOM SENSOR ACTIVE'
+                    : 'AMBIENT SYNC ON'}
                 </Text>
               </View>
-              <Text style={styles.metaDot}>•</Text>
-              <Text style={styles.metaEngineText}>Vega Media Engine</Text>
+            </TVFocusGuideView>
+          </View>
+
+          {/* Center Pause Watermark Indicator */}
+          {!isPlaying && (
+            <View style={styles.pausedIndicator} pointerEvents="none">
+              <View style={styles.pausedBadge}>
+                <Text style={styles.pausedIcon}>⏸</Text>
+                <Text style={styles.pausedText}>PAUSED</Text>
+              </View>
             </View>
-          </View>
+          )}
 
-          {/* Room Sensing Status Indicator */}
-          <View style={styles.ambientPill}>
-            <View
-              style={[
-                styles.ambientDot,
-                roomState.sensorStatus === 'active' && styles.ambientDotActive,
-              ]}
-            />
-            <Text style={styles.ambientPillText}>
-              {roomState.activeGesture
-                ? `ROOM: ${roomState.activeGesture.toUpperCase()}`
-                : roomState.sensorStatus === 'active'
-                ? 'ROOM SENSOR ACTIVE'
-                : 'AMBIENT SYNC ON'}
-            </Text>
-          </View>
-        </TVFocusGuideView>
-      </View>
+          {/* Bottom Cinema Playback Control Bar */}
+          <View style={styles.bottomControls}>
+            {/* Progress Bar & Real Time Stamps */}
+            <View style={styles.progressRow}>
+              <Text style={styles.timeLabel}>
+                {formatTime(Math.min(durationSec, currentTimeSec))}
+              </Text>
+              <View style={styles.progressBarTrack}>
+                <View
+                  style={[styles.progressBarFill, {width: `${progressPercent}%`}]}
+                />
+                <View
+                  style={[
+                    styles.progressBarThumb,
+                    {left: `${Math.min(99, progressPercent)}%`},
+                  ]}
+                />
+              </View>
+              <Text style={styles.timeLabel}>{formatTime(durationSec)}</Text>
+            </View>
 
-      {/* 6. Center Pause Watermark Indicator */}
-      {!isPlaying && (
-        <View style={styles.pausedIndicator} pointerEvents="none">
-          <View style={styles.pausedBadge}>
-            <Text style={styles.pausedIcon}>⏸</Text>
-            <Text style={styles.pausedText}>PAUSED</Text>
+            {/* Interactive TV Remote Control Buttons */}
+            <TVFocusGuideView style={styles.controlsRow}>
+              <Pressable
+                style={[
+                  styles.controlBtn,
+                  styles.primaryControlBtn,
+                  focusedControl === 'play' && styles.controlBtnFocused,
+                ]}
+                onFocus={() => {
+                  resetHideTimer();
+                  setFocusedControl('play');
+                }}
+                onPress={handleTogglePlay}
+                accessibilityRole="button"
+                accessibilityLabel={isPlaying ? 'Pause video' : 'Play video'}
+                testID="btn-player-toggle">
+                <Text style={styles.primaryControlBtnText}>
+                  {isPlaying ? '⏸  Pause' : '▶  Resume'}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.controlBtn,
+                  focusedControl === 'restart' && styles.controlBtnFocused,
+                ]}
+                onFocus={() => {
+                  resetHideTimer();
+                  setFocusedControl('restart');
+                }}
+                onPress={handleRestart}
+                accessibilityRole="button"
+                accessibilityLabel="Restart video from beginning"
+                testID="btn-player-restart">
+                <Text style={styles.controlBtnText}>↺  Restart</Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.controlBtn,
+                  styles.recapBtn,
+                  focusedControl === 'recap' && styles.controlBtnFocused,
+                ]}
+                onFocus={() => {
+                  resetHideTimer();
+                  setFocusedControl('recap');
+                }}
+                onPress={() => {
+                  resetHideTimer();
+                  onRoomRecap(item);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Open ambient room context recap"
+                testID="btn-player-recap">
+                <Text style={styles.recapBtnIcon}>⚡</Text>
+                <Text style={styles.recapBtnText}>Room Context</Text>
+              </Pressable>
+            </TVFocusGuideView>
           </View>
-        </View>
+        </>
       )}
-
-      {/* 7. Bottom Cinema Playback Control Bar */}
-      <View style={styles.bottomControls}>
-        {/* Progress Bar & Real Time Stamps */}
-        <View style={styles.progressRow}>
-          <Text style={styles.timeLabel}>{formatTime(currentTimeSec)}</Text>
-          <View style={styles.progressBarTrack}>
-            <View
-              style={[styles.progressBarFill, {width: `${progressPercent}%`}]}
-            />
-            <View
-              style={[
-                styles.progressBarThumb,
-                {left: `${Math.min(99, progressPercent)}%`},
-              ]}
-            />
-          </View>
-          <Text style={styles.timeLabel}>{formatTime(durationSec)}</Text>
-        </View>
-
-        {/* Interactive TV Remote Control Buttons */}
-        <TVFocusGuideView style={styles.controlsRow}>
-          <Pressable
-            style={[
-              styles.controlBtn,
-              styles.primaryControlBtn,
-              focusedControl === 'play' && styles.controlBtnFocused,
-            ]}
-            onFocus={() => setFocusedControl('play')}
-            onPress={handleTogglePlay}
-            accessibilityRole="button"
-            accessibilityLabel={isPlaying ? 'Pause video' : 'Play video'}
-            testID="btn-player-toggle">
-            <Text style={styles.primaryControlBtnText}>
-              {isPlaying ? '⏸  Pause' : '▶  Resume'}
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[
-              styles.controlBtn,
-              focusedControl === 'restart' && styles.controlBtnFocused,
-            ]}
-            onFocus={() => setFocusedControl('restart')}
-            onPress={handleRestart}
-            accessibilityRole="button"
-            accessibilityLabel="Restart video from beginning"
-            testID="btn-player-restart">
-            <Text style={styles.controlBtnText}>↺  Restart</Text>
-          </Pressable>
-
-          <Pressable
-            style={[
-              styles.controlBtn,
-              styles.recapBtn,
-              focusedControl === 'recap' && styles.controlBtnFocused,
-            ]}
-            onFocus={() => setFocusedControl('recap')}
-            onPress={() => onRoomRecap(item)}
-            accessibilityRole="button"
-            accessibilityLabel="Open ambient room context recap"
-            testID="btn-player-recap">
-            <Text style={styles.recapBtnIcon}>⚡</Text>
-            <Text style={styles.recapBtnText}>Room Context</Text>
-          </Pressable>
-        </TVFocusGuideView>
-      </View>
     </View>
   );
 };
