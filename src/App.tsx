@@ -33,9 +33,7 @@ export const LivingFrameHome = () => {
   const [featuredItem, setFeaturedItem] = useState<MediaItem>(
     fallbackCategories[0].items[0] || fallbackMediaItems[0],
   );
-  const [focusedItemId, setFocusedItemId] = useState<string | null>(
-    fallbackCategories[0].items[0]?.id || null,
-  );
+  const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
   const [detailsModalItem, setDetailsModalItem] = useState<MediaItem | null>(null);
   const [recapModalItem, setRecapModalItem] = useState<MediaItem | null>(null);
   const [playingItem, setPlayingItem] = useState<MediaItem | null>(null);
@@ -48,6 +46,10 @@ export const LivingFrameHome = () => {
   const scrollRef = useRef<ScrollView>(null);
   const rowOffsetsRef = useRef<Map<number, number>>(new Map());
   const lastScrolledRowRef = useRef<number>(HERO_ROW_INDEX);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({y: 0, animated: false});
+  }, []);
 
   const handleRowLayout = useCallback(
     (row: number, event: LayoutChangeEvent) => {
@@ -64,6 +66,11 @@ export const LivingFrameHome = () => {
         return;
       }
       lastScrolledRowRef.current = position.row;
+      if (position.row === HERO_ROW_INDEX) {
+        setFocusedItemId(null);
+        scrollRef.current?.scrollTo({y: 0, animated: true});
+        return;
+      }
       const y = rowOffsetsRef.current.get(position.row);
       if (y !== undefined) {
         scrollRef.current?.scrollTo({y: Math.max(0, y - 16), animated: true});
@@ -161,7 +168,6 @@ export const LivingFrameHome = () => {
         setCategories(loadedCategories);
         if (loadedCategories[0]?.items[0]) {
           setFeaturedItem(loadedCategories[0].items[0]);
-          setFocusedItemId(loadedCategories[0].items[0].id);
         }
       }
     });

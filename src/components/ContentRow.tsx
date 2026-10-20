@@ -63,7 +63,7 @@ export const ContentRow = ({
                 onFocus={() => handleCardFocus(item, index)}
                 onPress={() => onItemSelect(item)}
                 testID={cellId}
-                hasTVPreferredFocus={isFirstRow && index === 0}
+                hasTVPreferredFocus={false}
               />
             );
           })}

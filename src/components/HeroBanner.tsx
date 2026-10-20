@@ -26,7 +26,7 @@ export const HeroBanner = ({
   onRoomRecap,
 }: HeroBannerProps) => {
   const [focusedBtn, setFocusedBtn] = useState<'explore' | 'info' | 'recap' | null>(
-    null,
+    'explore',
   );
   const navFocus = useNavFocus();
 
