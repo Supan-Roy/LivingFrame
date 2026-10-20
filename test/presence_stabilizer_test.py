@@ -52,12 +52,26 @@ check("confirmed baseline", s.confirmed, 1)
 check("blip sample 1 ignored", s.add_sample(2, 0.3), None)
 check("blip sample 2 ignored", s.add_sample(1, 0.4), None)
 
-# Baseline, then a sustained increase -> person_entered
+# Baseline, then a sustained increase -> person_entered.
+# The majority window must shift before a change is confirmed, so a single frame
+# where a person is missed cannot flip the count.
 s = w.PresenceStabilizer(window=3, confirm=2, cooldown=3.0)
 for t in (0.0, 0.1, 0.2):
     s.add_sample(1, t)
 check("single changed sample does not fire", s.add_sample(2, 1.0), None)
-check("sustained change fires person_entered", s.add_sample(2, 1.1), ("person_entered", 2, 1))
+check("second changed sample still not confirmed", s.add_sample(2, 1.1), None)
+check("majority shift fires person_entered", s.add_sample(2, 1.2), ("person_entered", 2, 1))
+
+# Flickering single-frame misses must not change the confirmed count
+s4 = w.PresenceStabilizer(window=5, confirm=3, cooldown=3.0)
+for t in (0.0, 0.1, 0.2):
+    s4.add_sample(2, t)
+flicker = [
+    s4.add_sample(1, 2.0), s4.add_sample(2, 2.1), s4.add_sample(1, 2.2),
+    s4.add_sample(2, 2.3), s4.add_sample(2, 2.4),
+]
+check("intermittent misses keep the count stable", flicker, [None, None, None, None, None])
+check("stable count stays at 2", s4.stable_count(), 2)
 
 # Sustained decrease (past the cooldown) -> person_left
 event = None

@@ -61,7 +61,7 @@ from PIL import Image
 DEFAULT_DEVICE = '/dev/video0'
 DEFAULT_SERVER = 'http://localhost:8080'
 DEFAULT_MODEL = os.path.join(PROJECT_ROOT, 'models', 'gesture_recognizer.task')
-DEFAULT_POSE_MODEL = os.path.join(PROJECT_ROOT, 'models', 'pose_landmarker_lite.task')
+DEFAULT_POSE_MODEL = os.path.join(PROJECT_ROOT, 'models', 'pose_landmarker_full.task')
 
 # Room presence (visible person count) detection.
 # Presence changes slowly, so the pose model runs on a fraction of frames to keep the
@@ -153,26 +153,29 @@ class PresenceStabilizer:
     def add_sample(self, count, now):
         """Feed a raw count. Returns (event_type, count, previous) or None.
 
-        A change is confirmed only when the same count is seen for `confirm`
-        consecutive samples, so a single flickering sample can never fire an event.
+        The decision uses the *majority* of the rolling window rather than the latest
+        frame, so a person who is only intermittently recognised (odd pose, partial
+        frame, motion blur) still produces a steady count instead of flickering.
+        A change is confirmed only when that majority persists for `confirm` samples.
         """
         self.samples.append(count)
+        stable = self.stable_count()
 
         if self.confirmed is None:
             # Baseline after the first few samples, so startup noise cannot fire an event
             if len(self.samples) >= self.confirm:
-                self.confirmed = count
+                self.confirmed = stable
             return None
 
-        if count == self.confirmed:
+        if stable == self.confirmed:
             self.pending_value = None
             self.pending_count = 0
             return None
 
-        if count == self.pending_value:
+        if stable == self.pending_value:
             self.pending_count += 1
         else:
-            self.pending_value = count
+            self.pending_value = stable
             self.pending_count = 1
 
         if self.pending_count < self.confirm:
@@ -182,15 +185,15 @@ class PresenceStabilizer:
             return None
 
         previous = self.confirmed
-        event_type = 'person_entered' if count > previous else 'person_left'
-        self.confirmed = count
+        event_type = 'person_entered' if stable > previous else 'person_left'
+        self.confirmed = stable
         self.last_event_time = now
         self.pending_value = None
         self.pending_count = 0
-        return event_type, count, previous
+        return event_type, stable, previous
 
 
-def count_visible_poses(result, min_visibility=0.3, min_visible_landmarks=6):
+def count_visible_poses(result, min_visibility=0.2, min_visible_landmarks=4):
     """Count poses that really have enough visible landmarks.
 
     Presence only — never identity. Guards against MediaPipe emitting low-confidence
@@ -755,8 +758,8 @@ class WebcamSensor:
             print(f"[WARN] [PRESENCE] Pose model not found at '{self.pose_model_path}'.")
             print("   Room presence detection disabled (gesture control is unaffected).")
             print("   Download it with:")
-            print("     curl -L -o models/pose_landmarker_lite.task \\")
-            print("       https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task")
+            print("     curl -L -o models/pose_landmarker_full.task \\")
+            print("       https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task")
         else:
             try:
                 print(f"[PRESENCE INIT] Loading Pose Landmarker from {os.path.basename(self.pose_model_path)}...")
@@ -764,9 +767,9 @@ class WebcamSensor:
                     base_options=mp_python.BaseOptions(model_asset_path=self.pose_model_path),
                     running_mode=mp_vision.RunningMode.IMAGE,
                     num_poses=PRESENCE_MAX_POSES,
-                    min_pose_detection_confidence=0.5,
-                    min_pose_presence_confidence=0.5,
-                    min_tracking_confidence=0.5,
+                    min_pose_detection_confidence=0.3,
+                    min_pose_presence_confidence=0.3,
+                    min_tracking_confidence=0.3,
                 )
                 pose_landmarker = mp_vision.PoseLandmarker.create_from_options(pose_options)
                 print(f"[OK] [PRESENCE READY] Pose Landmarker · up to {PRESENCE_MAX_POSES} people · sampled every {PRESENCE_FRAME_INTERVAL} frames")
@@ -979,18 +982,15 @@ class WebcamSensor:
                         pose_result = pose_landmarker.detect(mp_image)
                         self.person_count = count_visible_poses(pose_result)
                         presence_event = self.presence.add_sample(self.person_count, now)
+                        stable_count = self.presence.stable_count()
                         if presence_event:
                             event_type, count, previous = presence_event
                             self.send_room_event(event_type, count, previous)
                             self.last_reported_person_count = count
-                        elif (
-                            self.presence.confirmed is not None
-                            and self.presence.confirmed != self.last_reported_person_count
-                        ):
-                            # Baseline just established (or changed silently): tell the app
-                            # the current count so it knows who is already in the room.
-                            self.send_person_count(self.presence.confirmed)
-                            self.last_reported_person_count = self.presence.confirmed
+                        elif stable_count != self.last_reported_person_count:
+                            # Keep the app's live count in step with the stabilised value
+                            self.send_person_count(stable_count)
+                            self.last_reported_person_count = stable_count
                         if len(results.hand_landmarks or []) == 0:
                             # Draw the count on the preview only when no hand label is shown
                             cv2.putText(annotated_rgb, f"People: {self.person_count}",
@@ -1054,7 +1054,7 @@ def main():
     parser = argparse.ArgumentParser(description='LivingFrame Laptop Webcam Room Sensor')
     parser.add_argument('--engine', choices=['mediapipe', 'heuristic'], default='mediapipe', help='Gesture detection engine (default: mediapipe)')
     parser.add_argument('--model', default=DEFAULT_MODEL, help='Path to MediaPipe gesture_recognizer.task model')
-    parser.add_argument('--pose-model', default=DEFAULT_POSE_MODEL, help='Path to MediaPipe pose_landmarker_lite.task model (room presence)')
+    parser.add_argument('--pose-model', default=DEFAULT_POSE_MODEL, help='Path to MediaPipe pose_landmarker_full.task model (room presence)')
     parser.add_argument('--confidence', type=float, default=0.55, help='Minimum confidence threshold for ML gesture detection (default: 0.55)')
     parser.add_argument('--device', default=DEFAULT_DEVICE, help='V4L2 camera device (default: /dev/video0)')
     parser.add_argument('--server', default=DEFAULT_SERVER, help='WebSocket/HTTP server URL (default: http://localhost:8080)')

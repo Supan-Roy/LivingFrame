@@ -241,13 +241,13 @@ npm test -- --runInBand
 LivingFrame reacts to changes in the **room**, not just to hand gestures.
 
 **Presence detection (local, no cloud).** The sensor runs MediaPipe's Pose Landmarker
-(lite, ~5.8 MB) on a fraction of camera frames and emits `person_entered` / `person_left`
+(full, ~9.4 MB) on a fraction of camera frames and emits `person_entered` / `person_left`
 over the existing WebSocket. It counts **visible people only** — no identity, age, or face
 recognition. Download the model once:
 
 ```bash
-curl -L -o models/pose_landmarker_lite.task \
-  https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
+curl -L -o models/pose_landmarker_full.task \
+  https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task
 ```
 
 If it is missing, gesture control still works and presence detection is simply disabled.

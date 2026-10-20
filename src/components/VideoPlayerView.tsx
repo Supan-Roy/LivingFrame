@@ -1,4 +1,4 @@
-import React, {useState, useRef, useEffect, useCallback} from 'react';
+import React, {useState, useRef, useEffect, useCallback, useMemo} from 'react';
 import {
   StyleSheet,
   Text,
@@ -6,6 +6,7 @@ import {
   Pressable,
   ActivityIndicator,
   Dimensions,
+  PanResponder,
 } from 'react-native';
 import {
   TVFocusGuideView,
@@ -55,6 +56,39 @@ export const VideoPlayerView = ({
   const [roomNotice, setRoomNotice] = useState<string | null>(null);
   const [statsVisible, setStatsVisible] = useState<boolean>(false);
   const [arrivalText, setArrivalText] = useState<string | null>(null);
+  const [panelOffset, setPanelOffset] = useState<{x: number; y: number}>({
+    x: 0,
+    y: 0,
+  });
+  const panelOffsetRef = useRef<{x: number; y: number}>({x: 0, y: 0});
+  const dragStartRef = useRef<{x: number; y: number}>({x: 0, y: 0});
+
+  // Drag the stats panel with the cursor/touch. Bounded so it cannot be lost off-screen.
+  const panelPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          dragStartRef.current = {...panelOffsetRef.current};
+        },
+        onPanResponderMove: (_event, gesture) => {
+          const next = {
+            x: Math.max(
+              -deviceWidth * 0.6,
+              Math.min(deviceWidth * 0.4, dragStartRef.current.x + gesture.dx),
+            ),
+            y: Math.max(
+              -deviceHeight * 0.5,
+              Math.min(deviceHeight * 0.5, dragStartRef.current.y + gesture.dy),
+            ),
+          };
+          panelOffsetRef.current = next;
+          setPanelOffset(next);
+        },
+      }),
+    [deviceWidth, deviceHeight],
+  );
 
   const playerRef = useRef<VideoPlayer | null>(null);
   const surfaceHandleRef = useRef<string | null>(null);
@@ -737,9 +771,29 @@ export const VideoPlayerView = ({
 
       {/* Family Mode room stats — right edge, semi-transparent, dismissible */}
       {statsVisible && roomState.familyModeEnabled && (
-        <View style={styles.roomStatsPanel} testID="room-stats-panel">
+        <View
+          style={[
+            styles.roomStatsPanel,
+            {
+              transform: [
+                {translateX: panelOffset.x},
+                {translateY: panelOffset.y},
+              ],
+            },
+          ]}
+          testID="room-stats-panel">
           <View style={styles.roomStatsHeader}>
-            <Text style={styles.roomStatsTitle}>FAMILY MODE</Text>
+            <View
+              style={styles.roomStatsDragHandle}
+              {...panelPanResponder.panHandlers}
+              testID="room-stats-drag-handle">
+              <View style={styles.roomStatsGrip}>
+                {[0, 1, 2, 3, 4, 5].map(dot => (
+                  <View key={dot} style={styles.roomStatsGripDot} />
+                ))}
+              </View>
+              <Text style={styles.roomStatsTitle}>FAMILY MODE</Text>
+            </View>
             <Pressable
               style={styles.roomStatsDismiss}
               onPress={() => setStatsVisible(false)}
@@ -1172,6 +1226,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
+  },
+  roomStatsDragHandle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  roomStatsGrip: {
+    width: 12,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 2,
+    marginRight: 8,
+  },
+  roomStatsGripDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: 'rgba(226, 232, 240, 0.55)',
   },
   roomStatsTitle: {
     fontSize: 11,
