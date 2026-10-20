@@ -330,7 +330,7 @@ const server = http.createServer((req, res) => {
     }
     .header {
       width: 100%;
-      max-width: 680px;
+      max-width: 960px;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -378,7 +378,7 @@ const server = http.createServer((req, res) => {
     .camera-card {
       position: relative;
       width: 100%;
-      max-width: 680px;
+      max-width: 960px;
       background: #0F172A;
       border: 2px solid rgba(0, 229, 255, 0.3);
       border-radius: 18px;
@@ -457,7 +457,7 @@ const server = http.createServer((req, res) => {
     .metric-val.gold { color: #FFC107; }
     .footer {
       width: 100%;
-      max-width: 680px;
+      max-width: 960px;
       margin-top: 16px;
       display: flex;
       justify-content: space-between;
@@ -478,7 +478,7 @@ const server = http.createServer((req, res) => {
     .btn-manual:active { transform: scale(0.96); }
     .room-log {
       width: 100%;
-      max-width: 680px;
+      max-width: 960px;
       margin-top: 16px;
       background: #0F172A;
       border: 1px solid rgba(255, 255, 255, 0.1);

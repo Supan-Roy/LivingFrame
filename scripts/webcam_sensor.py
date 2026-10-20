@@ -64,6 +64,13 @@ DEFAULT_SERVER = 'http://localhost:8080'
 DEFAULT_MODEL = os.path.join(PROJECT_ROOT, 'models', 'gesture_recognizer.task')
 DEFAULT_POSE_MODEL = os.path.join(PROJECT_ROOT, 'models', 'pose_landmarker_full.task')
 
+# Capture/preview sizing. A larger capture gives the pose/face/age models more detail;
+# the native preview window is scaled larger for visual clarity.
+CAPTURE_WIDTH = 480
+CAPTURE_HEIGHT = 360
+PREVIEW_WIDTH = 960
+PREVIEW_HEIGHT = 720
+
 # Room presence (visible person count) detection.
 # Presence changes slowly, so the pose model runs on a fraction of frames to keep the
 # gesture pipeline at full rate.
@@ -84,6 +91,8 @@ CHILD_CONFIRM_SAMPLES = 3        # consecutive pose samples needed to change sta
 CHILD_RATIO_WINDOW = 5           # moving-median window over raw ratios
 CHILD_MIN_LANDMARK_VISIBILITY = 0.3
 CHILD_MAX_SHOULDER_TILT = 0.5    # reject clearly turned poses (dy > 50% of dx)
+POSE_CHILD_RATIO_MIN = 0.20      # plausible head/shoulder ratios only (fallback gate)
+POSE_CHILD_RATIO_MAX = 0.75
 
 # Real age classifier on face crops: GoogLeNet/Adience ONNX run through OpenCV DNN +
 # MediaPipe FaceDetector — no extra runtime dependency. Falls back to the pose ratio
@@ -363,12 +372,15 @@ class AgeEstimator:
         best_bracket = None
         for detection in detections[:MAX_AGE_FACES]:
             box = detection.bounding_box
-            pad_x = int(box.width * 0.2)
-            pad_y = int(box.height * 0.2)
-            x1 = max(0, box.origin_x - pad_x)
-            y1 = max(0, box.origin_y - pad_y)
-            x2 = min(width, box.origin_x + box.width + pad_x)
-            y2 = min(height, box.origin_y + box.height + pad_y)
+            # Square crop with ~20% padding, matching the model-zoo reference: the age
+            # model resizes to 224x224, so a non-square crop would distort the face.
+            side = int(max(box.width, box.height) * 1.2)
+            center_x = box.origin_x + box.width / 2
+            center_y = box.origin_y + box.height / 2
+            x1 = max(0, int(center_x - side / 2))
+            y1 = max(0, int(center_y - side / 2))
+            x2 = min(width, x1 + side)
+            y2 = min(height, y1 + side)
             crop = frame_rgb[y1:y2, x1:x2]
             if crop.size == 0:
                 continue
@@ -1024,8 +1036,8 @@ class WebcamSensor:
         age_estimator = AgeEstimator()
 
         # Step 4: Video capture pipeline
-        width = 320
-        height = 240
+        width = CAPTURE_WIDTH
+        height = CAPTURE_HEIGHT
         frame_size = width * height * 3
 
         if not os.path.exists(self.device):
@@ -1045,8 +1057,8 @@ class WebcamSensor:
                 'gst-launch-1.0', '-q',
                 'v4l2src', f'device={self.device}',
                 '!', 'tee', 'name=t',
-                't.', '!', 'queue', '!', 'videoconvert', '!', 'videoscale', '!', 'video/x-raw,width=480,height=360',
-                '!', 'textoverlay', 'text=LivingFrame MediaPipe ML Sensor • Active', 'valignment=top', 'halignment=center', 'shaded-background=true', 'font-desc=Sans Bold 11',
+                't.', '!', 'queue', '!', 'videoconvert', '!', 'videoscale', '!', f'video/x-raw,width={PREVIEW_WIDTH},height={PREVIEW_HEIGHT}',
+                '!', 'textoverlay', 'text=LivingFrame MediaPipe ML Sensor • Active', 'valignment=top', 'halignment=center', 'shaded-background=true', 'font-desc=Sans Bold 14',
                 '!', 'ximagesink',
                 't.', '!', 'queue', '!', 'videoconvert', '!', 'videoscale', '!', f'video/x-raw,format=RGB,width={width},height={height},framerate=10/1',
                 '!', 'fdsink', 'fd=1'
@@ -1246,11 +1258,19 @@ class WebcamSensor:
                             self.last_child_probability = p_child
                             self.child_present = self.age_decider.add_value(p_child)
                             signal = f"age p={p_child:.2f} bracket={age_bracket}"
-                        else:
+                        elif (
+                            self.person_count > 0
+                            and POSE_CHILD_RATIO_MIN <= max_ratio <= POSE_CHILD_RATIO_MAX
+                        ):
                             self.last_child_source = 'pose'
                             self.child_present = self.pose_decider.add_value(max_ratio)
                             self.last_child_ratio = self.pose_decider.median
                             signal = f"pose ratio={self.pose_decider.median:.2f}"
+                        else:
+                            # No usable measurement (no face, nobody counted, or an
+                            # implausible pose ratio): hold the current decision instead
+                            # of feeding noise into the decider.
+                            signal = f"no signal (people={self.person_count})"
 
                         self.child_count = 1 if self.child_present else 0
                         if self.child_present != self.reported_child_present:
