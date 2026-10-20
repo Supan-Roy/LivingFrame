@@ -5,7 +5,7 @@ import {useRoom} from '../context/RoomContext';
 import {HEADER_TOGGLE_ID} from '../navigation/focusGrid';
 
 export const Header = () => {
-  const {roomState, sendVisionCommand} = useRoom();
+  const {roomState, setGesturesEnabled} = useRoom();
 
   return (
     <View style={styles.headerContainer}>
@@ -26,12 +26,12 @@ export const Header = () => {
       <Pressable
         style={[
           styles.gestureToggle,
-          roomState.visionEnabled && styles.gestureToggleOn,
+          roomState.gesturesEnabled && styles.gestureToggleOn,
         ]}
-        onPress={() => sendVisionCommand(!roomState.visionEnabled)}
+        onPress={() => setGesturesEnabled(!roomState.gesturesEnabled)}
         accessibilityRole="button"
         accessibilityLabel={
-          roomState.visionEnabled
+          roomState.gesturesEnabled
             ? 'Turn off gesture control'
             : 'Turn on gesture control'
         }
@@ -40,9 +40,9 @@ export const Header = () => {
         <Text
           style={[
             styles.gestureToggleText,
-            roomState.visionEnabled && styles.gestureToggleTextOn,
+            roomState.gesturesEnabled && styles.gestureToggleTextOn,
           ]}>
-          {roomState.visionEnabled ? 'GESTURES ON' : 'GESTURES OFF'}
+          {roomState.gesturesEnabled ? 'GESTURES ON' : 'GESTURES OFF'}
         </Text>
       </Pressable>
     </View>

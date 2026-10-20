@@ -87,7 +87,12 @@ class MockWebSocket {
 
 const item = {...fallbackMediaItems[0], durationSec: 30};
 
-describe('Gesture control toggle', () => {
+const visionCommands = (ws: MockWebSocket) =>
+  ws.sent
+    .map(payload => JSON.parse(payload))
+    .filter(message => message.type === 'vision_control');
+
+describe('vision switches share one sensor', () => {
   const realWebSocket = (globalThis as any).WebSocket;
 
   beforeEach(() => {
@@ -123,26 +128,60 @@ describe('Gesture control toggle', () => {
     return {screen, ws};
   };
 
-  it('sends a real vision_control enable command and reflects server status', async () => {
+  const label = (screen: any, testID: string) =>
+    screen.getByTestId(testID).props.accessibilityLabel;
+
+  it('does not drive the sensor until a switch is used', async () => {
+    const {ws} = await setup();
+    expect(visionCommands(ws)).toEqual([]);
+  });
+
+  it('gesture control alone starts the sensor', async () => {
     const {screen, ws} = await setup();
 
-    const toggle = screen.getByTestId('btn-player-gesture-toggle');
-    expect(toggle.props.accessibilityLabel).toBe('Turn on gesture control');
+    fireEvent.press(screen.getByTestId('btn-player-gesture-toggle'));
 
-    fireEvent.press(toggle);
+    expect(visionCommands(ws)).toEqual([{type: 'vision_control', enabled: true}]);
+    expect(label(screen, 'btn-player-gesture-toggle')).toBe(
+      'Turn off gesture control',
+    );
+  });
 
-    const command = ws.sent
-      .map(payload => JSON.parse(payload))
-      .find(message => message.type === 'vision_control');
-    expect(command).toEqual({type: 'vision_control', enabled: true});
+  it('Family Mode alone starts the sensor, without enabling gestures', async () => {
+    const {screen, ws} = await setup();
 
-    act(() => {
-      if (ws.onmessage) {
-        ws.onmessage({data: JSON.stringify({type: 'vision_status', enabled: true})});
-      }
-    });
-    expect(
-      screen.getByTestId('btn-player-gesture-toggle').props.accessibilityLabel,
-    ).toBe('Turn off gesture control');
+    fireEvent.press(screen.getByTestId('btn-player-family-toggle'));
+
+    expect(visionCommands(ws)).toEqual([{type: 'vision_control', enabled: true}]);
+    expect(label(screen, 'btn-player-family-toggle')).toBe('Turn off Family Mode');
+    // Presence needs the camera; gesture control stays off.
+    expect(label(screen, 'btn-player-gesture-toggle')).toBe(
+      'Turn on gesture control',
+    );
+  });
+
+  it('keeps the sensor running while either capability needs it', async () => {
+    const {screen, ws} = await setup();
+
+    fireEvent.press(screen.getByTestId('btn-player-gesture-toggle')); // gestures on
+    fireEvent.press(screen.getByTestId('btn-player-family-toggle')); // family on
+    fireEvent.press(screen.getByTestId('btn-player-gesture-toggle')); // gestures off
+
+    // Family Mode still needs presence, so the sensor must not be stopped.
+    expect(visionCommands(ws)).toEqual([{type: 'vision_control', enabled: true}]);
+  });
+
+  it('stops the sensor only when both capabilities are off', async () => {
+    const {screen, ws} = await setup();
+
+    fireEvent.press(screen.getByTestId('btn-player-gesture-toggle')); // on
+    fireEvent.press(screen.getByTestId('btn-player-family-toggle')); // on
+    fireEvent.press(screen.getByTestId('btn-player-gesture-toggle')); // off
+    fireEvent.press(screen.getByTestId('btn-player-family-toggle')); // off -> stop
+
+    expect(visionCommands(ws)).toEqual([
+      {type: 'vision_control', enabled: true},
+      {type: 'vision_control', enabled: false},
+    ]);
   });
 });

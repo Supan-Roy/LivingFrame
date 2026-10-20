@@ -64,6 +64,8 @@ export interface RoomState {
   activeGesture?: RoomGestureType | null;
   gestureTimestamp?: number | null;
   visionEnabled: boolean;
+  /** Viewer preference: consume hand gestures for control. */
+  gesturesEnabled: boolean;
   /** Viewer preference: when on, room changes can trigger family-safe playback. */
   familyModeEnabled: boolean;
 }

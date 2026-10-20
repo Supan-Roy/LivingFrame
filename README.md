@@ -258,6 +258,14 @@ the asset's authored metadata, playback **pauses**, the picture is covered, and 
 explains why. Playback resumes automatically when the room clears, or via *Resume anyway*.
 With Family Mode off, playback is completely unaffected.
 
+**Two switches, one camera.** Gesture control and Family Mode are independent preferences
+that share the webcam sensor: it runs while **either** is on, and each switch only gates its
+own behaviour. Family Mode therefore works on its own (presence detection) without enabling
+gesture control, and turning gestures off will not stop the camera while Family Mode still
+needs it — the sensor stops only when both are off. The app only starts/stops the sensor
+after you use one of the switches, so a sensor started from the CLI is never clobbered on
+connect.
+
 **Authored safety metadata** (`src/data/catalogData.ts`) — hand-written per demo asset,
 not content analysis: `Behind The Screams` is tagged `adult_content` for its whole 10 s
 clip; `Cereal Streamz` and `Feline Assistant` are marked family-safe.

@@ -75,7 +75,7 @@ export const VideoPlayerView = ({
   const isLoadedRef = useRef<boolean>(false);
   const gestureFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roomNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const {roomState, sendVisionCommand, setFamilyMode} = useRoom();
+  const {roomState, setGesturesEnabled, setFamilyMode} = useRoom();
   const lastGestureEventIdRef = useRef<string | null>(roomState.lastEvent?.id ?? null);
 
   // --- Family Mode / room-aware protection state ---
@@ -772,17 +772,17 @@ export const VideoPlayerView = ({
               <Pressable
                 style={[
                   styles.visionToggle,
-                  roomState.visionEnabled && styles.visionToggleOn,
+                  roomState.gesturesEnabled && styles.visionToggleOn,
                   focusedControl === 'gesture' && styles.visionToggleFocused,
                 ]}
                 onFocus={() => {
                   resetHideTimer();
                   setFocusedControl('gesture');
                 }}
-                onPress={() => sendVisionCommand(!roomState.visionEnabled)}
+                onPress={() => setGesturesEnabled(!roomState.gesturesEnabled)}
                 accessibilityRole="button"
                 accessibilityLabel={
-                  roomState.visionEnabled
+                  roomState.gesturesEnabled
                     ? 'Turn off gesture control'
                     : 'Turn on gesture control'
                 }
@@ -791,9 +791,9 @@ export const VideoPlayerView = ({
                 <Text
                   style={[
                     styles.visionToggleText,
-                    roomState.visionEnabled && styles.visionToggleTextOn,
+                    roomState.gesturesEnabled && styles.visionToggleTextOn,
                   ]}>
-                  {roomState.visionEnabled ? 'GESTURES ON' : 'GESTURES OFF'}
+                  {roomState.gesturesEnabled ? 'GESTURES ON' : 'GESTURES OFF'}
                 </Text>
               </Pressable>
 

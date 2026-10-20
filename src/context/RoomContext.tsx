@@ -20,6 +20,7 @@ interface RoomContextValue {
   reconnectServer: () => void;
   dismissGesture: () => void;
   sendVisionCommand: (enabled: boolean) => void;
+  setGesturesEnabled: (enabled: boolean) => void;
   setFamilyMode: (enabled: boolean) => void;
 }
 
@@ -35,6 +36,7 @@ const defaultRoomState: RoomState = {
   activeGesture: null,
   gestureTimestamp: null,
   visionEnabled: false,
+  gesturesEnabled: false,
   familyModeEnabled: false,
 };
 
@@ -45,6 +47,7 @@ const RoomContext = createContext<RoomContextValue>({
   reconnectServer: () => {},
   dismissGesture: () => {},
   sendVisionCommand: () => {},
+  setGesturesEnabled: () => {},
   setFamilyMode: () => {},
 });
 
@@ -56,6 +59,14 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
   const candidateIndexRef = useRef<number>(0);
   const isMountedRef = useRef<boolean>(true);
   const eventSeqRef = useRef<number>(0);
+  // Gesture events are ignored unless the viewer has gesture control on; a ref keeps
+  // the long-lived WebSocket handler reading the current value.
+  const gesturesEnabledRef = useRef<boolean>(false);
+  // Only drive the sensor after the viewer uses a switch (see the effect below).
+  const userVisionPrefRef = useRef<boolean>(false);
+  const desiredVisionRef = useRef<{desired: boolean; url: string | null} | null>(
+    null,
+  );
 
   const connectToCandidate = useCallback((index: number) => {
     if (!isMountedRef.current) {
@@ -114,6 +125,12 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
             parsed.gesture === 'hand_raised' ||
             parsed.payload?.gesture === 'hand_raised'
           ) {
+            // Gesture control is an explicit opt-in. Presence detection (person events)
+            // keeps working even when gesture control is off.
+            if (!gesturesEnabledRef.current) {
+              return;
+            }
+
             const gestureType: RoomGestureType =
               parsed.gesture || parsed.payload?.gesture || 'hand_raised';
             const message = parsed.message || 'Hand Raised Detected';
@@ -331,13 +348,52 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
     }
   }, []);
 
+  const setGesturesEnabled = useCallback((enabled: boolean) => {
+    console.log(`[LivingFrame] Gesture control ${enabled ? 'enabled' : 'disabled'}`);
+    userVisionPrefRef.current = true;
+    setRoomState((prev) => ({
+      ...prev,
+      gesturesEnabled: enabled,
+    }));
+  }, []);
+
   const setFamilyMode = useCallback((enabled: boolean) => {
     console.log(`[LivingFrame] Family Mode ${enabled ? 'enabled' : 'disabled'}`);
+    userVisionPrefRef.current = true;
     setRoomState((prev) => ({
       ...prev,
       familyModeEnabled: enabled,
     }));
   }, []);
+
+  // Keep the WebSocket handler's view of the gesture preference current.
+  useEffect(() => {
+    gesturesEnabledRef.current = roomState.gesturesEnabled;
+  }, [roomState.gesturesEnabled]);
+
+  // One camera, two independent capabilities:
+  //   the sensor runs iff gesture control OR Family Mode needs it.
+  // Each switch only gates its own behaviour; neither owns the camera alone.
+  // We only drive the sensor once the viewer has actually used a switch, so the app
+  // never clobbers a sensor started elsewhere (e.g. from the CLI).
+  useEffect(() => {
+    if (!userVisionPrefRef.current) {
+      return;
+    }
+    const desired = roomState.gesturesEnabled || roomState.familyModeEnabled;
+    const url = roomState.connectedUrl ?? null;
+    const last = desiredVisionRef.current;
+    if (last && last.desired === desired && last.url === url) {
+      return;
+    }
+    desiredVisionRef.current = {desired, url};
+    sendVisionCommand(desired);
+  }, [
+    roomState.gesturesEnabled,
+    roomState.familyModeEnabled,
+    roomState.connectedUrl,
+    sendVisionCommand,
+  ]);
 
   const triggerMockEvent = (event: Partial<RoomEvent>) => {
     const fullEvent: RoomEvent = {
@@ -369,6 +425,7 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
         reconnectServer,
         dismissGesture,
         sendVisionCommand,
+        setGesturesEnabled,
         setFamilyMode,
       }}>
       {children}
