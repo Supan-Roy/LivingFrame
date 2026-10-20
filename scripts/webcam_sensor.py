@@ -103,8 +103,8 @@ AGE_MEAN = (104, 117, 123)
 AGE_CLASSES = ['(0-2)', '(4-6)', '(8-12)', '(15-20)', '(25-32)', '(38-43)', '(48-53)', '(60-100)']
 CHILD_AGE_BRACKETS = (0, 1, 2)   # (0-2), (4-6), (8-12)
 CHILD_INCLUDE_TEEN = False       # set True to also protect the (15-20) bracket
-CHILD_PROB_ON = 0.55             # probability mass at which a child is considered present
-CHILD_PROB_OFF = 0.35            # ... and cleared again
+CHILD_PROB_ON = 0.40             # probability mass at which a child is considered present
+CHILD_PROB_OFF = 0.32            # ... and cleared again
 FACE_SCORE_THRESHOLD = 0.3       # full-range detector; lower gate catches small faces
 FACE_MIN_SUPPRESSION = 0.3
 MAX_AGE_FACES = 3                # classify at most this many faces per sample
@@ -358,7 +358,10 @@ class AgeEstimator:
         logits = net.forward().reshape(-1)[:len(AGE_CLASSES)]
         probabilities = softmax(logits)
         bracket = AGE_CLASSES[probabilities.index(max(probabilities))]
-        return child_probability(probabilities), bracket
+        p_child = child_probability(probabilities)
+        if bracket in ('(0-2)', '(4-6)', '(8-12)'):
+            p_child = max(p_child, 0.52)
+        return p_child, bracket
 
     def _head_crop(self, frame_rgb, landmarks):
         """Crop a square head region from pose landmarks (ears, else eyes), or None."""
@@ -526,19 +529,14 @@ def estimate_child_likelihood(landmarks, min_visibility=CHILD_MIN_LANDMARK_VISIB
 
     try:
         left_ear, right_ear = landmarks[7], landmarks[8]
+        left_eye, right_eye = landmarks[2], landmarks[5]
         left_shoulder, right_shoulder = landmarks[11], landmarks[12]
     except (IndexError, TypeError):
         return None
 
-    if min(
-        visibility(left_ear),
-        visibility(right_ear),
-        visibility(left_shoulder),
-        visibility(right_shoulder),
-    ) < min_visibility:
+    if min(visibility(left_shoulder), visibility(right_shoulder)) < min_visibility:
         return None
 
-    head_width = math.hypot(left_ear.x - right_ear.x, left_ear.y - right_ear.y)
     shoulder_dx = abs(left_shoulder.x - right_shoulder.x)
     shoulder_dy = abs(left_shoulder.y - right_shoulder.y)
     if shoulder_dx <= 0 or shoulder_dy > CHILD_MAX_SHOULDER_TILT * shoulder_dx:
@@ -546,6 +544,17 @@ def estimate_child_likelihood(landmarks, min_visibility=CHILD_MIN_LANDMARK_VISIB
         return None
     shoulder_width = math.hypot(shoulder_dx, shoulder_dy)
     if shoulder_width <= 0:
+        return None
+
+    # Ear-to-ear is primary; fall back to eye distance * 1.7 if ears are occluded (e.g. hair)
+    if min(visibility(left_ear), visibility(right_ear)) >= min_visibility:
+        head_width = math.hypot(left_ear.x - right_ear.x, left_ear.y - right_ear.y)
+    elif min(visibility(left_eye), visibility(right_eye)) >= min_visibility:
+        head_width = math.hypot(left_eye.x - right_eye.x, left_eye.y - right_eye.y) * 1.7
+    else:
+        return None
+
+    if head_width <= 0:
         return None
     return head_width / shoulder_width
 
@@ -1356,7 +1365,7 @@ class WebcamSensor:
                     try:
                         # Reuse the frame already prepared for gesture recognition
                         pose_result = pose_landmarker.detect(mp_image)
-                        self.person_count = count_visible_poses(pose_result)
+                        pose_count = count_visible_poses(pose_result)
                         max_ratio = 0.0
                         for landmarks in (pose_result.pose_landmarks or []):
                             ratio = estimate_child_likelihood(landmarks)
@@ -1366,14 +1375,16 @@ class WebcamSensor:
                         # Prefer the real age classifier on face crops; fall back to the
                         # pose-proportion ratio when no face is visible.
                         p_child, age_bracket = (None, None)
+                        face_count = 0
                         if age_estimator is not None:
                             p_child, age_bracket = age_estimator.estimate(frame_rgb, mp_image)
+                            face_count = age_estimator.last_face_count
                             # If the face detector saw fewer faces than the pose model saw
                             # people, also classify pose-derived head crops — this recovers
                             # a child whose face is too small at full-frame scale.
                             if (
                                 p_child is None
-                                or age_estimator.last_face_count < self.person_count
+                                or face_count < pose_count
                             ):
                                 head_prob, head_bracket = age_estimator.estimate_heads(
                                     frame_rgb, pose_result.pose_landmarks or []
@@ -1382,6 +1393,13 @@ class WebcamSensor:
                                     p_child is None or head_prob > p_child
                                 ):
                                     p_child, age_bracket = head_prob, head_bracket
+
+                        # Sensor fusion: combine body poses and face detections.
+                        # Couch/seated scenarios frequently occlude body torsos where MediaPipe Pose
+                        # only detects 1 person, but BlazeFace sees 2 distinct faces. Fusion
+                        # prevents count instability (1 -> 2 -> 1).
+                        raw_person_count = max(pose_count, face_count)
+                        self.person_count = raw_person_count
 
                         if p_child is not None:
                             self.last_child_source = 'age'
@@ -1404,26 +1422,33 @@ class WebcamSensor:
                             signal = f"no signal (people={self.person_count})"
 
                         self.child_count = 1 if self.child_present else 0
-                        if self.child_present != self.reported_child_present:
+                        child_state_changed = (self.child_present != self.reported_child_present)
+                        if child_state_changed:
                             print(
                                 f"[PRESENCE] Child present: "
                                 f"{'yes' if self.child_present else 'no'} ({signal})"
                             )
                             self.reported_child_present = self.child_present
+
                         presence_event = self.presence.add_sample(self.person_count, now)
                         stable_count = self.presence.stable_count()
                         if presence_event:
                             event_type, count, previous = presence_event
                             self.send_room_event(event_type, count, previous)
                             self.last_reported_person_count = count
-                        elif stable_count != self.last_reported_person_count:
-                            # Keep the app's live count in step with the stabilised value
+                        elif stable_count != self.last_reported_person_count or child_state_changed:
+                            # Keep the app's live count and child status in step with the stabilised value
                             self.send_person_count(stable_count)
                             self.last_reported_person_count = stable_count
+
                         if len(results.hand_landmarks or []) == 0:
-                            # Draw the count on the preview only when no hand label is shown
-                            cv2.putText(annotated_rgb, f"People: {self.person_count}",
-                                        (8, height - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 229, 255), 1)
+                            # Draw the count and child status on the preview
+                            count_label = f"People: {self.person_count}"
+                            if self.child_present:
+                                count_label += " | Child Detected"
+                            tag_color = (0, 140, 255) if self.child_present else (0, 229, 255)
+                            cv2.putText(annotated_rgb, count_label,
+                                        (8, height - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, tag_color, 1)
                     except Exception as e:
                         print(f"[PRESENCE WARN] Frame error: {e}")
 
@@ -1441,6 +1466,7 @@ class WebcamSensor:
                             'X-Confidence': f"{detected_score:.2f}",
                             'X-Handedness': detected_hand,
                             'X-Person-Count': str(self.person_count),
+                            'X-Child-Present': '1' if self.child_present else '0',
                             'X-FPS': f"{current_fps:.1f}",
                         }
                         self.uploader.post_frame(bio.getvalue(), headers)

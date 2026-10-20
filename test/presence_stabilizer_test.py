@@ -152,6 +152,28 @@ check(
     None,
 )
 
+# Test eye fallback when ears are occluded (e.g. hair)
+def make_body_with_eyes(eye_distance, shoulder_width, ears_visible=False, visibility=0.9):
+    landmarks = [FakeLandmark(0.5, 0.5, visibility) for _ in range(33)]
+    ear_vis = visibility if ears_visible else 0.1
+    landmarks[7] = FakeLandmark(0.5 - 0.10, 0.2, ear_vis)
+    landmarks[8] = FakeLandmark(0.5 + 0.10, 0.2, ear_vis)
+    landmarks[2] = FakeLandmark(0.5 - eye_distance / 2, 0.2, visibility)
+    landmarks[5] = FakeLandmark(0.5 + eye_distance / 2, 0.2, visibility)
+    landmarks[11] = FakeLandmark(0.5 - shoulder_width / 2, 0.5, visibility)
+    landmarks[12] = FakeLandmark(0.5 + shoulder_width / 2, 0.5, visibility)
+    return landmarks
+
+occluded_ratio = w.estimate_child_likelihood(
+    make_body_with_eyes(eye_distance=0.14, shoulder_width=0.40, ears_visible=False)
+)
+# 0.14 * 1.7 / 0.40 = 0.595 >= CHILD_RATIO_ON (0.50)
+check(
+    "ear occlusion falls back to eye landmarks for child ratio",
+    occluded_ratio is not None and occluded_ratio >= w.CHILD_RATIO_ON,
+    True,
+)
+
 print("\n== ChildPresenceDecider (median + hysteresis) ==")
 adult = w.ChildPresenceDecider()
 adult_states = [adult.add_value(r) for r in (0.38, 0.44, 0.49, 0.42, 0.32, 0.45, 0.31)]
@@ -197,9 +219,18 @@ age_decider = w.ChildPresenceDecider(on=w.CHILD_PROB_ON, off=w.CHILD_PROB_OFF)
 adult_age = [age_decider.add_value(p) for p in (0.10, 0.15, 0.05, 0.20, 0.08, 0.12)]
 check("adult age probabilities never flag a child", any(adult_age), False)
 
+# Realistic adult webcam probability baseline (~0.31)
+adult_real_age = [age_decider.add_value(p) for p in (0.28, 0.31, 0.30, 0.29, 0.31)]
+check("realistic adult probability (~0.31) stays below threshold", any(adult_real_age), False)
+
 child_age_decider = w.ChildPresenceDecider(on=w.CHILD_PROB_ON, off=w.CHILD_PROB_OFF)
 child_age = [child_age_decider.add_value(p) for p in (0.62, 0.70, 0.58, 0.66)]
 check("high child probabilities flag a child", child_age[-1], True)
+
+# Realistic child webcam probability mass (~0.45)
+child_calibrated_decider = w.ChildPresenceDecider(on=w.CHILD_PROB_ON, off=w.CHILD_PROB_OFF)
+child_real_states = [child_calibrated_decider.add_value(p) for p in (0.45, 0.46, 0.45, 0.47)]
+check("calibrated child probability (~0.45) reliably flags child", child_real_states[-1], True)
 
 print("\n== _detect_swipe (Natural Motion & Scroll Direction) ==")
 sensor = w.WebcamSensor(manual_mode=True, preview=False)

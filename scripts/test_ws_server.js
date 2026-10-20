@@ -280,6 +280,7 @@ const server = http.createServer((req, res) => {
           delta: parseInt(req.headers['x-delta'], 10) || 0,
           fps: parseFloat(req.headers['x-fps']) || 0,
           personCount: parseInt(req.headers['x-person-count'], 10) || 0,
+          childPresent: req.headers['x-child-present'] === '1',
           timestamp: Date.now(),
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -590,7 +591,7 @@ const server = http.createServer((req, res) => {
         const data = await res.json();
         metricEngine.innerText = (data.engine === 'mediapipe' ? 'MediaPipe ML' : 'Heuristic');
         metricFps.innerText = (data.fps || 10).toFixed(1) + ' fps';
-        metricPeople.innerText = String(data.personCount || 0);
+        metricPeople.innerText = String(data.personCount || 0) + (data.childPresent ? ' (Child Detected)' : '');
 
         if (data.activeGesture && data.activeGesture !== 'None') {
           const label = data.activeGesture.replace(/_/g, ' ').toUpperCase();
