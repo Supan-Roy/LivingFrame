@@ -83,10 +83,14 @@ export const LivingFrameHome = () => {
 
       if (position.row !== lastScrolledRowRef.current) {
         lastScrolledRowRef.current = position.row;
-        const y =
+        // Keep hero card and row 1 visible at top (y=0); scroll smoothly for rows 2+
+        const heroOffset = rowOffsetsRef.current.get(1) ?? 300;
+        const targetOffset =
           rowOffsetsRef.current.get(position.row) ??
           300 + (position.row - 1) * 260;
-        scrollRef.current?.scrollTo({y: Math.max(0, y - 24), animated: true});
+        const targetY =
+          position.row <= 1 ? 0 : Math.max(0, targetOffset - heroOffset);
+        scrollRef.current?.scrollTo({y: targetY, animated: true});
       }
     },
     [reportFocus, categories, featuredRowItems, featuredIndex],

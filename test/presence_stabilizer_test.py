@@ -224,18 +224,32 @@ sensor._detect_swipe(FakeHandResults(0.5, 0.25), 2.0)
 swipe_res = sensor._detect_swipe(FakeHandResults(0.5, 0.75), 2.15)
 check("lowering hand (upper to lower) produces up scroll", swipe_res, 'swipe_up')
 
-# 3. Horizontal right: moving from x=0.3 to x=0.7 -> dx > 0 -> swipe_right
+# 3. Diagonal natural arm arc rising (hand lower to higher with horizontal arm drift)
 sensor.swipe_history.clear()
 sensor.last_swipe_time = 0.0
-sensor._detect_swipe(FakeHandResults(0.3, 0.5), 3.0)
-swipe_res = sensor._detect_swipe(FakeHandResults(0.7, 0.5), 3.15)
+sensor._detect_swipe(FakeHandResults(0.50, 0.75), 3.0)
+swipe_res = sensor._detect_swipe(FakeHandResults(0.56, 0.30), 3.15)
+check("diagonal hand rise with arm drift produces down scroll", swipe_res, 'swipe_down')
+
+# 4. Diagonal natural arm arc lowering (hand upper to lower with horizontal arm drift)
+sensor.swipe_history.clear()
+sensor.last_swipe_time = 0.0
+sensor._detect_swipe(FakeHandResults(0.55, 0.25), 4.0)
+swipe_res = sensor._detect_swipe(FakeHandResults(0.49, 0.70), 4.15)
+check("diagonal hand lower with arm drift produces up scroll", swipe_res, 'swipe_up')
+
+# 5. Horizontal right: moving from x=0.3 to x=0.7 -> dx > 0 -> swipe_right
+sensor.swipe_history.clear()
+sensor.last_swipe_time = 0.0
+sensor._detect_swipe(FakeHandResults(0.3, 0.5), 5.0)
+swipe_res = sensor._detect_swipe(FakeHandResults(0.7, 0.5), 5.15)
 check("horizontal right produces swipe_right", swipe_res, 'swipe_right')
 
-# 4. Horizontal left: moving from x=0.7 to x=0.3 -> dx < 0 -> swipe_left
+# 6. Horizontal left: moving from x=0.7 to x=0.3 -> dx < 0 -> swipe_left
 sensor.swipe_history.clear()
 sensor.last_swipe_time = 0.0
-sensor._detect_swipe(FakeHandResults(0.7, 0.5), 4.0)
-swipe_res = sensor._detect_swipe(FakeHandResults(0.3, 0.5), 4.15)
+sensor._detect_swipe(FakeHandResults(0.7, 0.5), 6.0)
+swipe_res = sensor._detect_swipe(FakeHandResults(0.3, 0.5), 6.15)
 check("horizontal left produces swipe_left", swipe_res, 'swipe_left')
 
 total = len(RESULTS)

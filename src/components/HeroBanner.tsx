@@ -29,6 +29,7 @@ export const HeroBanner = ({
   onMoreInfo,
   onRoomRecap,
 }: HeroBannerProps) => {
+  const [hasInitialFocus, setHasInitialFocus] = useState(true);
   const [focusedBtn, setFocusedBtn] = useState<'explore' | 'info' | 'recap' | null>(
     'explore',
   );
@@ -113,12 +114,13 @@ export const HeroBanner = ({
                 focusedBtn === 'explore' && styles.buttonFocused,
               ]}
               onFocus={() => {
+                setHasInitialFocus(false);
                 setFocusedBtn('explore');
                 navFocus?.reportFocus({row: 0, col: 0});
               }}
               onBlur={() => setFocusedBtn(null)}
               onPress={() => onExplore(item)}
-              hasTVPreferredFocus={true}
+              hasTVPreferredFocus={hasInitialFocus}
               accessibilityRole="button"
               accessibilityLabel={`Watch ${item.title}`}
               testID="hero-btn-explore">
@@ -136,6 +138,7 @@ export const HeroBanner = ({
                 focusedBtn === 'info' && styles.buttonFocused,
               ]}
               onFocus={() => {
+                setHasInitialFocus(false);
                 setFocusedBtn('info');
                 navFocus?.reportFocus({row: 0, col: 1});
               }}
@@ -158,6 +161,7 @@ export const HeroBanner = ({
                 focusedBtn === 'recap' && styles.buttonFocused,
               ]}
               onFocus={() => {
+                setHasInitialFocus(false);
                 setFocusedBtn('recap');
                 navFocus?.reportFocus({row: 0, col: 2});
               }}

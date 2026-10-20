@@ -793,9 +793,10 @@ class WebcamSensor:
         span = end_t - start_t
         dx = end_x - start_x
         dy = end_y - start_y
+        best_dist_sq = dx * dx + dy * dy
 
-        # Search for peak directional stroke displacement across recent history
-        # so quick natural flicks that slow or bounce at the end are captured accurately
+        # Search for peak stroke displacement across recent history using the single best sample pair (i, j)
+        # so motion vectors are coupled (avoiding decoupled dx/dy distortion during natural curved arm gestures)
         for i in range(len(self.swipe_history) - 1):
             t_i, x_i, y_i = self.swipe_history[i]
             for j in range(i + 1, len(self.swipe_history)):
@@ -803,10 +804,12 @@ class WebcamSensor:
                 if (t_j - t_i) >= SWIPE_MIN_TIME_SEC:
                     cur_dx = x_j - x_i
                     cur_dy = y_j - y_i
-                    if abs(cur_dx) > abs(dx) and (cur_dx * dx >= 0 or abs(dx) < 0.04):
+                    dist_sq = cur_dx * cur_dx + cur_dy * cur_dy
+                    if dist_sq > best_dist_sq:
+                        best_dist_sq = dist_sq
                         dx = cur_dx
-                    if abs(cur_dy) > abs(dy) and (cur_dy * dy >= 0 or abs(dy) < 0.04):
                         dy = cur_dy
+                        span = t_j - t_i
 
         if self.swipe_debug and (abs(dx) >= 0.03 or abs(dy) >= 0.03):
             print(f"[SWIPE DEBUG] samples={len(self.swipe_history)} span={span:.2f}s dx={dx:+.2f} dy={dy:+.2f}")
@@ -816,17 +819,17 @@ class WebcamSensor:
         if (now - self.last_swipe_time) < SWIPE_COOLDOWN_SEC:
             return None
 
+        # Natural push/scroll physics:
+        # Hand rises lower to higher (dy < 0) -> down scroll ('swipe_down')
+        # Hand lowers upper to lower (dy > 0) -> up scroll ('swipe_up')
+        if abs(dy) >= SWIPE_DY_THRESHOLD and abs(dy) > abs(dx) * SWIPE_DOMINANCE_RATIO:
+            self.last_swipe_time = now
+            self.swipe_history.clear()
+            return 'swipe_down' if dy < 0 else 'swipe_up'
         if abs(dx) >= SWIPE_DX_THRESHOLD and abs(dx) > abs(dy) * SWIPE_DOMINANCE_RATIO:
             self.last_swipe_time = now
             self.swipe_history.clear()
             return 'swipe_right' if dx > 0 else 'swipe_left'
-        if abs(dy) >= SWIPE_DY_THRESHOLD and abs(dy) > abs(dx) * SWIPE_DOMINANCE_RATIO:
-            self.last_swipe_time = now
-            self.swipe_history.clear()
-            # Natural push/scroll physics:
-            # Hand rises lower to higher (dy < 0) -> down scroll ('swipe_down')
-            # Hand lowers upper to lower (dy > 0) -> up scroll ('swipe_up')
-            return 'swipe_down' if dy < 0 else 'swipe_up'
         return None
 
     def _track_motion(self, results, now):
