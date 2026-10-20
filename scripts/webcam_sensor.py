@@ -66,8 +66,8 @@ DEFAULT_POSE_MODEL = os.path.join(PROJECT_ROOT, 'models', 'pose_landmarker_full.
 
 # Capture/preview sizing. A larger capture gives the pose/face/age models more detail;
 # the native preview window is scaled larger for visual clarity.
-CAPTURE_WIDTH = 480
-CAPTURE_HEIGHT = 360
+CAPTURE_WIDTH = 640
+CAPTURE_HEIGHT = 480
 PREVIEW_WIDTH = 960
 PREVIEW_HEIGHT = 720
 
@@ -98,14 +98,15 @@ POSE_CHILD_RATIO_MAX = 0.75
 # MediaPipe FaceDetector — no extra runtime dependency. Falls back to the pose ratio
 # above when no face is visible.
 AGE_MODEL_PATH = os.path.join(PROJECT_ROOT, 'models', 'age_googlenet.onnx')
-FACE_MODEL_PATH = os.path.join(PROJECT_ROOT, 'models', 'blaze_face_short_range.tflite')
+FACE_MODEL_PATH = os.path.join(PROJECT_ROOT, 'models', 'blaze_face_full_range.tflite')
 AGE_MEAN = (104, 117, 123)
 AGE_CLASSES = ['(0-2)', '(4-6)', '(8-12)', '(15-20)', '(25-32)', '(38-43)', '(48-53)', '(60-100)']
 CHILD_AGE_BRACKETS = (0, 1, 2)   # (0-2), (4-6), (8-12)
 CHILD_INCLUDE_TEEN = False       # set True to also protect the (15-20) bracket
 CHILD_PROB_ON = 0.55             # probability mass at which a child is considered present
 CHILD_PROB_OFF = 0.35            # ... and cleared again
-FACE_SCORE_THRESHOLD = 0.5
+FACE_SCORE_THRESHOLD = 0.3       # full-range detector; lower gate catches small faces
+FACE_MIN_SUPPRESSION = 0.3
 MAX_AGE_FACES = 3                # classify at most this many faces per sample
 
 # MediaPipe Hand Landmarks Skeleton Connections
@@ -308,6 +309,10 @@ class AgeEstimator:
         self.cv2 = None
         self.mp = None
         self.score_threshold = score_threshold
+        self.last_face_count = 0
+        self.faces_summary = 'none'
+        self.debug_crops = os.environ.get('LIVINGFRAME_AGE_DEBUG') == '1'
+        self.crop_index = 0
         try:
             if not (os.path.exists(age_model_path) and os.path.exists(face_model_path)):
                 print("[WARN] [AGE] Age/face model files not found; using pose fallback")
@@ -322,7 +327,8 @@ class AgeEstimator:
             options = vision.FaceDetectorOptions(
                 base_options=BaseOptions(model_asset_path=face_model_path),
                 running_mode=vision.RunningMode.IMAGE,
-                min_detection_confidence=0.5,
+                min_detection_confidence=FACE_SCORE_THRESHOLD,
+                min_suppression_threshold=FACE_MIN_SUPPRESSION,
             )
             self.detector = vision.FaceDetector.create_from_options(options)
             self.available = True
@@ -332,6 +338,15 @@ class AgeEstimator:
 
     def _classify_crop(self, crop):
         resized = self.cv2.resize(crop, (224, 224))
+        if self.debug_crops and self.crop_index < 6:
+            try:
+                self.cv2.imwrite(
+                    f"/tmp/age_crop_{self.crop_index}.jpg",
+                    self.cv2.cvtColor(resized, self.cv2.COLOR_RGB2BGR),
+                )
+                self.crop_index += 1
+            except Exception:
+                pass
         blob = self.cv2.dnn.blobFromImage(
             resized, 1.0, (224, 224), AGE_MEAN, swapRB=False, crop=False
         )
@@ -340,6 +355,78 @@ class AgeEstimator:
         probabilities = softmax(logits)
         bracket = AGE_CLASSES[int(probabilities.index(max(probabilities)))]
         return child_probability(probabilities), bracket
+
+    def _head_crop(self, frame_rgb, landmarks):
+        """Crop a square head region from pose landmarks (ears, else eyes), or None."""
+        def visible(landmark):
+            value = getattr(landmark, 'visibility', 1.0)
+            return 1.0 if value is None else value
+
+        try:
+            left_ear, right_ear = landmarks[7], landmarks[8]
+            left_eye, right_eye = landmarks[2], landmarks[5]
+        except (IndexError, TypeError):
+            return None
+
+        if min(visible(left_ear), visible(right_ear)) >= CHILD_MIN_LANDMARK_VISIBILITY:
+            center_x_norm = (left_ear.x + right_ear.x) / 2
+            center_y_norm = (left_ear.y + right_ear.y) / 2
+            head_width = math.hypot(left_ear.x - right_ear.x, left_ear.y - right_ear.y)
+        elif min(visible(left_eye), visible(right_eye)) >= CHILD_MIN_LANDMARK_VISIBILITY:
+            # Ears are often occluded; the head is ~1.7x the inter-ocular distance.
+            center_x_norm = (left_eye.x + right_eye.x) / 2
+            center_y_norm = (left_eye.y + right_eye.y) / 2
+            head_width = (
+                math.hypot(left_eye.x - right_eye.x, left_eye.y - right_eye.y) * 1.7
+            )
+        else:
+            return None
+
+        if head_width <= 0:
+            return None
+
+        height, width = frame_rgb.shape[:2]
+        side = int(max(head_width * 2.6, 0.10) * width)
+        center_x = center_x_norm * width
+        # Eyes/ears sit high on the head; shift down so the crop includes nose/mouth.
+        center_y = center_y_norm * height + side * 0.22
+        x1 = max(0, int(center_x - side / 2))
+        y1 = max(0, int(center_y - side / 2))
+        x2 = min(width, x1 + side)
+        y2 = min(height, y1 + side)
+        crop = frame_rgb[y1:y2, x1:x2]
+        return crop if crop.size else None
+
+    def estimate_heads(self, frame_rgb, pose_landmarks_list):
+        """Classify pose-derived head crops.
+
+        Recovers people whose face the full-frame detector missed — notably a child
+        sitting back from the camera, whose face is small at 640x480.
+        """
+        if not self.available or not pose_landmarks_list:
+            return None, None
+
+        best_probability = None
+        best_bracket = None
+        summaries = []
+        for landmarks in pose_landmarks_list[:MAX_AGE_FACES]:
+            crop = self._head_crop(frame_rgb, landmarks)
+            if crop is None:
+                continue
+            try:
+                probability, bracket = self._classify_crop(crop)
+            except Exception as exc:
+                print(f"[WARN] [AGE] Head inference failed: {exc}")
+                continue
+            summaries.append(f"head {bracket}:{probability:.2f}")
+            if best_probability is None or probability > best_probability:
+                best_probability = probability
+                best_bracket = bracket
+
+        if summaries:
+            prefix = '' if self.faces_summary == 'none' else f"{self.faces_summary} | "
+            self.faces_summary = prefix + ', '.join(summaries)
+        return best_probability, best_bracket
 
     def estimate(self, frame_rgb, mp_image=None):
         """Return (p_child, bracket) for the most child-like visible face."""
@@ -361,7 +448,9 @@ class AgeEstimator:
             if detection.categories
             and float(detection.categories[0].score) >= self.score_threshold
         ]
+        self.last_face_count = len(detections)
         if not detections:
+            self.faces_summary = 'none'
             return None, None
         detections.sort(
             key=lambda d: d.bounding_box.width * d.bounding_box.height, reverse=True
@@ -370,6 +459,7 @@ class AgeEstimator:
         height, width = frame_rgb.shape[:2]
         best_probability = None
         best_bracket = None
+        summaries = []
         for detection in detections[:MAX_AGE_FACES]:
             box = detection.bounding_box
             # Square crop with ~20% padding, matching the model-zoo reference: the age
@@ -389,9 +479,11 @@ class AgeEstimator:
             except Exception as exc:
                 print(f"[WARN] [AGE] Inference failed: {exc}")
                 continue
+            summaries.append(f"{bracket}:{probability:.2f}")
             if best_probability is None or probability > best_probability:
                 best_probability = probability
                 best_bracket = bracket
+        self.faces_summary = ', '.join(summaries) or 'none'
         return best_probability, best_bracket
 
 
@@ -1251,6 +1343,20 @@ class WebcamSensor:
                         p_child, age_bracket = (None, None)
                         if age_estimator is not None:
                             p_child, age_bracket = age_estimator.estimate(frame_rgb, mp_image)
+                            # If the face detector saw fewer faces than the pose model saw
+                            # people, also classify pose-derived head crops — this recovers
+                            # a child whose face is too small at full-frame scale.
+                            if (
+                                p_child is None
+                                or age_estimator.last_face_count < self.person_count
+                            ):
+                                head_prob, head_bracket = age_estimator.estimate_heads(
+                                    frame_rgb, pose_result.pose_landmarks or []
+                                )
+                                if head_prob is not None and (
+                                    p_child is None or head_prob > p_child
+                                ):
+                                    p_child, age_bracket = head_prob, head_bracket
 
                         if p_child is not None:
                             self.last_child_source = 'age'
@@ -1321,11 +1427,15 @@ class WebcamSensor:
                     current_fps = fps_count / (now - fps_start)
                     hands_count = len(results.hand_landmarks) if results.hand_landmarks else 0
                     top_label = detected_category if (detected_category and detected_category != 'None') else 'None'
-                    child_info = (
-                        f"age p={self.last_child_probability:.2f} {self.last_age_bracket or ''}"
-                        if self.last_child_source == 'age'
-                        else f"pose r={self.last_child_ratio:.2f}"
-                    )
+                    if self.last_child_source == 'age' and age_estimator is not None:
+                        child_info = (
+                            f"age p={self.last_child_probability:.2f} "
+                            f"{self.last_age_bracket or ''} "
+                            f"faces={age_estimator.last_face_count}"
+                            f"[{age_estimator.faces_summary}]"
+                        )
+                    else:
+                        child_info = f"pose r={self.last_child_ratio:.2f}"
                     print(f"[ML RUNNING] ~{current_fps:.1f} fps | Hands: {hands_count} | People: {self.person_count} | Child: {child_info} | Active: {top_label} ({detected_score*100:.0f}%)", end='\r', flush=True)
                     fps_count = 0
                     fps_start = now
