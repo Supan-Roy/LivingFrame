@@ -16,6 +16,7 @@ export interface UseGestureNavigationArgs {
   cursor: MutableRefObject<NavPosition>;
   refs: MutableRefObject<Map<string, View>>;
   enabled: boolean;
+  onNavigate?: (target: NavPosition) => void;
 }
 
 /**
@@ -34,6 +35,7 @@ export const useGestureNavigation = ({
   cursor,
   refs,
   enabled,
+  onNavigate,
 }: UseGestureNavigationArgs): void => {
   const {roomState, dismissGesture} = useRoom();
   const lastEventIdRef = useRef<string | null>(roomState.lastEvent?.id ?? null);
@@ -66,8 +68,9 @@ export const useGestureNavigation = ({
       if (!cell) {
         return;
       }
-      requestFocus(refs.current.get(cell.id));
       cursor.current = target;
+      requestFocus(refs.current.get(cell.id));
+      onNavigate?.(target);
       return;
     }
 

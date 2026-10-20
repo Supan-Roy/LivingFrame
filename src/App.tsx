@@ -66,22 +66,30 @@ export const LivingFrameHome = () => {
   const handleReportFocus = useCallback(
     (position: NavPosition) => {
       reportFocus(position);
-      if (position.row === lastScrolledRowRef.current) {
-        return;
-      }
-      lastScrolledRowRef.current = position.row;
       if (position.row === HERO_ROW_INDEX) {
+        lastScrolledRowRef.current = HERO_ROW_INDEX;
         setFocusedItemId(null);
         setFeaturedItem(featuredRowItems[featuredIndex] || featuredRowItems[0]);
         scrollRef.current?.scrollTo({y: 0, animated: true});
         return;
       }
-      const y = rowOffsetsRef.current.get(position.row);
-      if (y !== undefined) {
-        scrollRef.current?.scrollTo({y: Math.max(0, y - 16), animated: true});
+
+      const categoryIndex = position.row - 1;
+      const targetItem = categories[categoryIndex]?.items[position.col];
+      if (targetItem) {
+        setFocusedItemId(targetItem.id);
+        setFeaturedItem(targetItem);
+      }
+
+      if (position.row !== lastScrolledRowRef.current) {
+        lastScrolledRowRef.current = position.row;
+        const y =
+          rowOffsetsRef.current.get(position.row) ??
+          300 + (position.row - 1) * 260;
+        scrollRef.current?.scrollTo({y: Math.max(0, y - 24), animated: true});
       }
     },
-    [reportFocus],
+    [reportFocus, categories, featuredRowItems, featuredIndex],
   );
 
   // Listen to remote play_video commands from telemetry server / gestures
@@ -272,6 +280,7 @@ export const LivingFrameHome = () => {
     refs: nav.refs,
     enabled:
       currentScreen === 'browse' && !detailsModalItem && !recapModalItem,
+    onNavigate: handleReportFocus,
   });
 
   const currentHeroIndex = useMemo(() => {

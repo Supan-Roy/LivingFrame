@@ -201,7 +201,45 @@ child_age_decider = w.ChildPresenceDecider(on=w.CHILD_PROB_ON, off=w.CHILD_PROB_
 child_age = [child_age_decider.add_value(p) for p in (0.62, 0.70, 0.58, 0.66)]
 check("high child probabilities flag a child", child_age[-1], True)
 
+print("\n== _detect_swipe (Natural Motion & Scroll Direction) ==")
+sensor = w.WebcamSensor(manual_mode=True, preview=False)
+
+class FakeHandResults:
+    def __init__(self, x, y):
+        # 21 landmarks; SWIPE_PALM_LANDMARK = 9
+        lms = [FakeLandmark(x, y) for _ in range(21)]
+        self.hand_landmarks = [lms]
+
+# 1. Hand rising: moving from lower (y=0.75) to higher (y=0.25) -> dy < 0 -> down scroll
+sensor.swipe_history.clear()
+sensor.last_swipe_time = 0.0
+sensor._detect_swipe(FakeHandResults(0.5, 0.75), 1.0)
+swipe_res = sensor._detect_swipe(FakeHandResults(0.5, 0.25), 1.15)
+check("rising hand (lower to higher) produces down scroll", swipe_res, 'swipe_down')
+
+# 2. Hand lowering: moving from upper (y=0.25) to lower (y=0.75) -> dy > 0 -> up scroll
+sensor.swipe_history.clear()
+sensor.last_swipe_time = 0.0
+sensor._detect_swipe(FakeHandResults(0.5, 0.25), 2.0)
+swipe_res = sensor._detect_swipe(FakeHandResults(0.5, 0.75), 2.15)
+check("lowering hand (upper to lower) produces up scroll", swipe_res, 'swipe_up')
+
+# 3. Horizontal right: moving from x=0.3 to x=0.7 -> dx > 0 -> swipe_right
+sensor.swipe_history.clear()
+sensor.last_swipe_time = 0.0
+sensor._detect_swipe(FakeHandResults(0.3, 0.5), 3.0)
+swipe_res = sensor._detect_swipe(FakeHandResults(0.7, 0.5), 3.15)
+check("horizontal right produces swipe_right", swipe_res, 'swipe_right')
+
+# 4. Horizontal left: moving from x=0.7 to x=0.3 -> dx < 0 -> swipe_left
+sensor.swipe_history.clear()
+sensor.last_swipe_time = 0.0
+sensor._detect_swipe(FakeHandResults(0.7, 0.5), 4.0)
+swipe_res = sensor._detect_swipe(FakeHandResults(0.3, 0.5), 4.15)
+check("horizontal left produces swipe_left", swipe_res, 'swipe_left')
+
 total = len(RESULTS)
 passed = sum(RESULTS)
 print(f"\n{passed}/{total} passed")
 sys.exit(0 if passed == total else 1)
+

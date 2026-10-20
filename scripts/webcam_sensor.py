@@ -134,9 +134,9 @@ GESTURE_MAP = {
 SWIPE_WINDOW_SEC = 0.7        # Time window over which motion is measured
 SWIPE_MIN_SAMPLES = 2         # Minimum tracked samples before a swipe can fire
 SWIPE_MIN_TIME_SEC = 0.08     # Minimum sample time span needed to infer a direction
-SWIPE_DX_THRESHOLD = 0.12     # Minimum horizontal travel (fraction of frame width)
-SWIPE_DY_THRESHOLD = 0.09     # Minimum vertical travel (fraction of frame height; 4:3 frame)
-SWIPE_DOMINANCE_RATIO = 1.4   # Swipe axis must exceed the other by this factor
+SWIPE_DX_THRESHOLD = 0.10     # Minimum horizontal travel (fraction of frame width)
+SWIPE_DY_THRESHOLD = 0.08     # Minimum vertical travel (fraction of frame height; 4:3 frame)
+SWIPE_DOMINANCE_RATIO = 1.15  # Swipe axis must exceed the other by this factor (allows natural hand arcs)
 SWIPE_COOLDOWN_SEC = 0.6      # Debounce between consecutive swipe dispatches
 SWIPE_SUPPRESS_SEC = 1.2      # Suppress gesture toggles right after a swipe dispatch
 SWIPE_PALM_LANDMARK = 9       # Middle-finger MCP: stable palm-center proxy
@@ -150,8 +150,8 @@ MOTION_MOVE_THRESHOLD = 0.05  # Palm travel (normalized) within the window that 
 SWIPE_LABELS = {
     'swipe_left': 'Swipe Left Detected',
     'swipe_right': 'Swipe Right Detected',
-    'swipe_up': 'Swipe Up Detected',
-    'swipe_down': 'Swipe Down Detected',
+    'swipe_up': 'Hand Lowered (Scroll Up)',
+    'swipe_down': 'Hand Raised (Scroll Down)',
 }
 
 
@@ -788,6 +788,20 @@ class WebcamSensor:
         dx = end_x - start_x
         dy = end_y - start_y
 
+        # Search for peak directional stroke displacement across recent history
+        # so quick natural flicks that slow or bounce at the end are captured accurately
+        for i in range(len(self.swipe_history) - 1):
+            t_i, x_i, y_i = self.swipe_history[i]
+            for j in range(i + 1, len(self.swipe_history)):
+                t_j, x_j, y_j = self.swipe_history[j]
+                if (t_j - t_i) >= SWIPE_MIN_TIME_SEC:
+                    cur_dx = x_j - x_i
+                    cur_dy = y_j - y_i
+                    if abs(cur_dx) > abs(dx) and (cur_dx * dx >= 0 or abs(dx) < 0.04):
+                        dx = cur_dx
+                    if abs(cur_dy) > abs(dy) and (cur_dy * dy >= 0 or abs(dy) < 0.04):
+                        dy = cur_dy
+
         if self.swipe_debug and (abs(dx) >= 0.03 or abs(dy) >= 0.03):
             print(f"[SWIPE DEBUG] samples={len(self.swipe_history)} span={span:.2f}s dx={dx:+.2f} dy={dy:+.2f}")
 
@@ -803,8 +817,10 @@ class WebcamSensor:
         if abs(dy) >= SWIPE_DY_THRESHOLD and abs(dy) > abs(dx) * SWIPE_DOMINANCE_RATIO:
             self.last_swipe_time = now
             self.swipe_history.clear()
-            # Image y grows downward: positive dy means the hand moved down
-            return 'swipe_down' if dy > 0 else 'swipe_up'
+            # Natural push/scroll physics:
+            # Hand rises lower to higher (dy < 0) -> down scroll ('swipe_down')
+            # Hand lowers upper to lower (dy > 0) -> up scroll ('swipe_up')
+            return 'swipe_down' if dy < 0 else 'swipe_up'
         return None
 
     def _track_motion(self, results, now):

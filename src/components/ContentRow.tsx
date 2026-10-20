@@ -1,4 +1,4 @@
-import React, {useRef} from 'react';
+import React, {useRef, useEffect} from 'react';
 import {StyleSheet, Text, View, ScrollView} from 'react-native';
 import {TVFocusGuideView} from '@amazon-devices/react-native-kepler';
 import {ContentCategory, MediaItem} from '../types/catalog';
@@ -26,16 +26,31 @@ export const ContentRow = ({
   const scrollViewRef = useRef<ScrollView>(null);
   const navFocus = useNavFocus();
 
+  const scrollToIndex = (index: number) => {
+    // Keep first 3 items stable; only scroll for items that extend toward/past edge
+    const targetOffset =
+      index < 3
+        ? 0
+        : Math.max(0, (index - 2) * (spacing.cardWidth + spacing.cardGap));
+    scrollViewRef.current?.scrollTo({x: targetOffset, animated: true});
+  };
+
   const handleCardFocus = (item: MediaItem, index: number) => {
     onItemFocus(item);
     navFocus?.reportFocus({row: rowIndex, col: index});
-    // Smooth auto-scroll for TV remote / gesture navigation
-    const targetOffset = Math.max(
-      0,
-      index * (spacing.cardWidth + spacing.cardGap) - 48,
-    );
-    scrollViewRef.current?.scrollTo({x: targetOffset, animated: true});
+    scrollToIndex(index);
   };
+
+  // Keep horizontal row scroll smoothly aligned whenever focusedItemId changes
+  useEffect(() => {
+    if (!focusedItemId) {
+      return;
+    }
+    const index = category.items.findIndex(item => item.id === focusedItemId);
+    if (index !== -1) {
+      scrollToIndex(index);
+    }
+  }, [focusedItemId, category.items]);
 
   return (
     <View style={styles.rowContainer}>
