@@ -30,6 +30,10 @@ import {colors} from './theme/theme';
 
 export const LivingFrameHome = () => {
   const [categories, setCategories] = useState<ContentCategory[]>(fallbackCategories);
+  const featuredRowItems = useMemo<MediaItem[]>(() => {
+    return categories[0]?.items?.length ? categories[0].items : fallbackCategories[0].items;
+  }, [categories]);
+  const [featuredIndex, setFeaturedIndex] = useState<number>(0);
   const [featuredItem, setFeaturedItem] = useState<MediaItem>(
     fallbackCategories[0].items[0] || fallbackMediaItems[0],
   );
@@ -68,6 +72,7 @@ export const LivingFrameHome = () => {
       lastScrolledRowRef.current = position.row;
       if (position.row === HERO_ROW_INDEX) {
         setFocusedItemId(null);
+        setFeaturedItem(featuredRowItems[featuredIndex] || featuredRowItems[0]);
         scrollRef.current?.scrollTo({y: 0, animated: true});
         return;
       }
@@ -168,6 +173,7 @@ export const LivingFrameHome = () => {
         setCategories(loadedCategories);
         if (loadedCategories[0]?.items[0]) {
           setFeaturedItem(loadedCategories[0].items[0]);
+          setFeaturedIndex(0);
         }
       }
     });
@@ -176,10 +182,48 @@ export const LivingFrameHome = () => {
     };
   }, []);
 
-  const handleCardFocus = useCallback((item: MediaItem) => {
-    setFocusedItemId(item.id);
-    setFeaturedItem(item);
-  }, []);
+  const currentScreen: 'browse' | 'player' = playingItem ? 'player' : 'browse';
+
+  // Auto-rotate hero spotlight every 5 seconds through each available title in the first row
+  useEffect(() => {
+    if (
+      currentScreen !== 'browse' ||
+      detailsModalItem !== null ||
+      recapModalItem !== null ||
+      focusedItemId !== null ||
+      featuredRowItems.length <= 1
+    ) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      setFeaturedIndex(prevIndex => {
+        const nextIndex = (prevIndex + 1) % featuredRowItems.length;
+        setFeaturedItem(featuredRowItems[nextIndex]);
+        return nextIndex;
+      });
+    }, 5000);
+
+    return () => clearInterval(intervalId);
+  }, [
+    currentScreen,
+    detailsModalItem,
+    recapModalItem,
+    focusedItemId,
+    featuredRowItems,
+  ]);
+
+  const handleCardFocus = useCallback(
+    (item: MediaItem) => {
+      setFocusedItemId(item.id);
+      const idx = featuredRowItems.findIndex(m => m.id === item.id);
+      if (idx !== -1) {
+        setFeaturedIndex(idx);
+      }
+      setFeaturedItem(item);
+    },
+    [featuredRowItems],
+  );
 
   const handleCardSelect = useCallback((item: MediaItem) => {
     setPlayingItem(item);
@@ -197,7 +241,6 @@ export const LivingFrameHome = () => {
     setRecapModalItem(item);
   }, []);
 
-  const currentScreen: 'browse' | 'player' = playingItem ? 'player' : 'browse';
 
   // Focusable grid: row 0 = hero actions, rows 1.. = content rows. Ids match the
   // components' registered refs. The header gesture switch is intentionally NOT here.
@@ -231,6 +274,11 @@ export const LivingFrameHome = () => {
       currentScreen === 'browse' && !detailsModalItem && !recapModalItem,
   });
 
+  const currentHeroIndex = useMemo(() => {
+    const idx = featuredRowItems.findIndex(m => m.id === featuredItem.id);
+    return idx !== -1 ? idx : featuredIndex;
+  }, [featuredRowItems, featuredItem.id, featuredIndex]);
+
   return (
     <NavFocusProvider
       registerRef={nav.registerRef}
@@ -254,6 +302,8 @@ export const LivingFrameHome = () => {
               <View onLayout={event => handleRowLayout(HERO_ROW_INDEX, event)}>
                 <HeroBanner
                   item={featuredItem}
+                  currentIndex={currentHeroIndex}
+                  totalCount={featuredRowItems.length}
                   onExplore={handleExplore}
                   onMoreInfo={handleMoreInfo}
                   onRoomRecap={handleRoomRecap}

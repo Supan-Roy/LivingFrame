@@ -14,6 +14,8 @@ import {Icon} from './Icon';
 
 export interface HeroBannerProps {
   item: MediaItem;
+  currentIndex?: number;
+  totalCount?: number;
   onExplore: (item: MediaItem) => void;
   onMoreInfo: (item: MediaItem) => void;
   onRoomRecap: (item: MediaItem) => void;
@@ -21,6 +23,8 @@ export interface HeroBannerProps {
 
 export const HeroBanner = ({
   item,
+  currentIndex = 0,
+  totalCount = 1,
   onExplore,
   onMoreInfo,
   onRoomRecap,
@@ -72,7 +76,7 @@ export const HeroBanner = ({
           </View>
 
           {/* Title */}
-          <Text style={styles.title} numberOfLines={1}>
+          <Text style={styles.title} numberOfLines={1} testID="hero-title">
             {item.title}
           </Text>
 
@@ -168,6 +172,21 @@ export const HeroBanner = ({
               <Text style={styles.aiButtonText}>Catch Me Up</Text>
             </Pressable>
           </TVFocusGuideView>
+
+          {/* Carousel Rotation Indicator Dots */}
+          {totalCount > 1 && (
+            <View style={styles.carouselIndicators}>
+              {Array.from({length: totalCount}).map((_, idx) => (
+                <View
+                  key={idx}
+                  style={[
+                    styles.indicatorDot,
+                    idx === currentIndex && styles.indicatorDotActive,
+                  ]}
+                />
+              ))}
+            </View>
+          )}
         </View>
 
         {/* Right Column: Clean Framed 16:9 Showcase Thumbnail Card */}
@@ -179,7 +198,11 @@ export const HeroBanner = ({
           />
           <View style={styles.showcaseOverlay} />
           <View style={styles.showcaseBadge}>
-            <Text style={styles.showcaseBadgeText}>FEATURED SPOTLIGHT</Text>
+            <Text style={styles.showcaseBadgeText}>
+              {totalCount > 1
+                ? `FEATURED • ${currentIndex + 1}/${totalCount}`
+                : 'FEATURED SPOTLIGHT'}
+            </Text>
           </View>
         </View>
       </View>
@@ -189,7 +212,7 @@ export const HeroBanner = ({
 
 const styles = StyleSheet.create({
   heroContainer: {
-    height: 275,
+    height: 290,
     width: '100%',
     position: 'relative',
     justifyContent: 'center',
@@ -414,5 +437,23 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.primary,
     letterSpacing: 0.8,
+  },
+  carouselIndicators: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+  },
+  indicatorDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  indicatorDotActive: {
+    width: 20,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.primary,
   },
 });

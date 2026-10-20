@@ -122,4 +122,31 @@ describe('LivingFrame App', () => {
     fireEvent.press(screen.getByTestId('btn-player-back'));
     expect(screen.queryByTestId('livingframe-videoplayer-view')).toBeNull();
   });
+
+  it('automatically rotates hero banner titles every 5 seconds through the first row', () => {
+    const screen = render(<App />);
+
+    // Initially shows first item in first row: Behind The Screams
+    expect(screen.getByTestId('hero-title').props.children).toBe('Behind The Screams');
+
+    // Advance 5 seconds: advances to Cereal Streamz
+    React.act(() => {
+      jest.advanceTimersByTime(5000);
+    });
+    expect(screen.getByTestId('hero-title').props.children).toBe('Cereal Streamz');
+
+    // Advance another 5 seconds: advances to Feline Assistant
+    React.act(() => {
+      jest.advanceTimersByTime(5000);
+    });
+    expect(screen.getByTestId('hero-title').props.children).toBe('Feline Assistant');
+
+    // Advance 3 more intervals (15s) to cycle through remaining items and wrap around
+    React.act(() => {
+      jest.advanceTimersByTime(15000);
+    });
+    // The Beige Knight -> Startup Strays -> wraps to Behind The Screams
+    expect(screen.getByTestId('hero-title').props.children).toBe('Behind The Screams');
+  });
 });
+
