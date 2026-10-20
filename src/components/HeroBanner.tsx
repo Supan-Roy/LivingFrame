@@ -10,6 +10,7 @@ import {TVFocusGuideView} from '@amazon-devices/react-native-kepler';
 import {MediaItem} from '../types/catalog';
 import {useNavFocus} from '../navigation/NavFocusContext';
 import {colors} from '../theme/theme';
+import {Icon} from './Icon';
 
 export interface HeroBannerProps {
   item: MediaItem;
@@ -63,7 +64,9 @@ export const HeroBanner = ({
               </Text>
             </View>
             <View style={styles.aiBadge}>
-              <Text style={styles.aiBadgeIcon}>⚡</Text>
+              <View style={styles.aiBadgeIcon}>
+                <Icon name="spark" size={9} color={colors.accentOrange} />
+              </View>
               <Text style={styles.aiBadgeText}>ROOM AWARE</Text>
             </View>
           </View>
@@ -75,7 +78,10 @@ export const HeroBanner = ({
 
           {/* Metadata Row */}
           <View style={styles.metaRow}>
-            <Text style={styles.ratingText}>★ {item.ratingStars.toFixed(1)}</Text>
+            <View style={styles.ratingRow}>
+              <Icon name="spark" size={10} color={colors.accentGold} />
+              <Text style={styles.ratingText}>{item.ratingStars.toFixed(1)}</Text>
+            </View>
             <Text style={styles.metaDot}>•</Text>
             <Text style={styles.metaText}>{item.releaseYear}</Text>
             <Text style={styles.metaDot}>•</Text>
@@ -112,7 +118,9 @@ export const HeroBanner = ({
               accessibilityRole="button"
               accessibilityLabel={`Watch ${item.title}`}
               testID="hero-btn-explore">
-              <Text style={styles.primaryButtonIcon}>▶</Text>
+              <View style={styles.primaryButtonIcon}>
+                <Icon name="play" size={12} color="#000000" />
+              </View>
               <Text style={styles.primaryButtonText}>Watch Now</Text>
             </Pressable>
 
@@ -132,7 +140,9 @@ export const HeroBanner = ({
               accessibilityRole="button"
               accessibilityLabel={`More info about ${item.title}`}
               testID="hero-btn-more-info">
-              <Text style={styles.secondaryButtonIcon}>ℹ</Text>
+              <View style={styles.secondaryButtonIcon}>
+                <Icon name="info" size={13} color="#FFFFFF" />
+              </View>
               <Text style={styles.secondaryButtonText}>Details</Text>
             </Pressable>
 
@@ -152,7 +162,9 @@ export const HeroBanner = ({
               accessibilityRole="button"
               accessibilityLabel={`Room Context Recap for ${item.title}`}
               testID="hero-btn-room-recap">
-              <Text style={styles.aiButtonIcon}>⚡</Text>
+              <View style={styles.aiButtonIcon}>
+                <Icon name="spark" size={11} color={colors.accentOrange} />
+              </View>
               <Text style={styles.aiButtonText}>Catch Me Up</Text>
             </Pressable>
           </TVFocusGuideView>
@@ -246,8 +258,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 107, 53, 0.6)',
   },
   aiBadgeIcon: {
-    fontSize: 10,
-    color: colors.accentOrange,
     marginRight: 4,
   },
   aiBadgeText: {
@@ -268,6 +278,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 8,
+  },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   ratingText: {
     fontSize: 13,
@@ -321,10 +336,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   primaryButtonIcon: {
-    fontSize: 13,
-    color: '#000000',
     marginRight: 6,
-    fontWeight: '900',
   },
   primaryButtonText: {
     fontSize: 13.5,
@@ -337,10 +349,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   secondaryButtonIcon: {
-    fontSize: 13,
-    color: '#FFFFFF',
     marginRight: 6,
-    fontWeight: 'bold',
   },
   secondaryButtonText: {
     fontSize: 13.5,
@@ -353,8 +362,6 @@ const styles = StyleSheet.create({
     borderColor: colors.accentOrange,
   },
   aiButtonIcon: {
-    fontSize: 13,
-    color: colors.accentOrange,
     marginRight: 6,
   },
   aiButtonText: {

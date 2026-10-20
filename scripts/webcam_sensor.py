@@ -85,11 +85,11 @@ HAND_CONNECTIONS = [
 # Supported Gesture Mappings (MediaPipe category name -> room gesture payload)
 # NOTE: Open_Palm is the physical "hand raise" used to toggle video playback.
 GESTURE_MAP = {
-    'Open_Palm': ('hand_raised', 'Hand Raised Detected', '✋'),
-    'Closed_Fist': ('closed_fist', 'Closed Fist Detected', '✊'),
-    'Thumb_Up': ('thumbs_up', 'Thumbs Up Detected', '👍'),
-    'Pointing_Up': ('point_to_screen', 'Pointing Detected', '👆'),
-    'Victory': ('victory', 'Victory Detected', '✌️'),
+    'Open_Palm': ('hand_raised', 'Hand Raised Detected'),
+    'Closed_Fist': ('closed_fist', 'Closed Fist Detected'),
+    'Thumb_Up': ('thumbs_up', 'Thumbs Up Detected'),
+    'Pointing_Up': ('point_to_screen', 'Pointing Detected'),
+    'Victory': ('victory', 'Victory Detected'),
 }
 
 # Horizontal/vertical swipe gesture tuning (normalized frame coordinates, 0..1).
@@ -109,12 +109,12 @@ SWIPE_PALM_LANDMARK = 9       # Middle-finger MCP: stable palm-center proxy
 MOTION_WINDOW_SEC = 0.25      # Window used to decide whether the hand is moving
 MOTION_MOVE_THRESHOLD = 0.05  # Palm travel (normalized) within the window that = moving
 
-# Swipe payload (emoji, human description) keyed by gesture name
+# Swipe payload (human description) keyed by gesture name
 SWIPE_LABELS = {
-    'swipe_left': ('⏪', 'Swipe Left Detected'),
-    'swipe_right': ('⏩', 'Swipe Right Detected'),
-    'swipe_up': ('⬆️', 'Swipe Up Detected'),
-    'swipe_down': ('⬇️', 'Swipe Down Detected'),
+    'swipe_left': 'Swipe Left Detected',
+    'swipe_right': 'Swipe Right Detected',
+    'swipe_up': 'Swipe Up Detected',
+    'swipe_down': 'Swipe Down Detected',
 }
 
 
@@ -316,8 +316,8 @@ class WebcamSensor:
     def send_event(self, gesture='open_palm', confidence=0.95, handedness='Right', message=None):
         """Send small structured JSON event to laptop WebSocket/HTTP server."""
         if not message:
-            _, default_msg, emoji = GESTURE_MAP.get(gesture, (gesture, 'Gesture Detected', '✋'))
-            message = f"{emoji} {default_msg}"
+            _, default_msg = GESTURE_MAP.get(gesture, (gesture, 'Gesture Detected'))
+            message = default_msg
 
         payload = {
             'type': 'gesture_detected',
@@ -342,13 +342,13 @@ class WebcamSensor:
             with urllib.request.urlopen(req, timeout=2.0) as resp:
                 result = json.loads(resp.read().decode('utf-8'))
                 clients = result.get('clientsNotified', 0)
-                print(f"📡 [EVENT SENT] '{gesture}' (conf={confidence:.2f}, hand={handedness}) -> {clients} connected TV client(s) notified!")
+                print(f"[EVENT SENT] '{gesture}' (conf={confidence:.2f}, hand={handedness}) -> {clients} connected TV client(s) notified!")
                 return True
         except urllib.error.URLError as e:
-            print(f"⚠️ [EVENT FAILED] Could not contact server at {trigger_url}: {e.reason}")
+            print(f"[WARN] [EVENT FAILED] Could not contact server at {trigger_url}: {e.reason}")
             return False
         except Exception as e:
-            print(f"⚠️ [EVENT ERROR] {e}")
+            print(f"[WARN] [EVENT ERROR] {e}")
             return False
 
     def send_room_event(self, event_type, count, previous, source='webcam'):
@@ -377,12 +377,11 @@ class WebcamSensor:
             with urllib.request.urlopen(req, timeout=2.0) as resp:
                 result = json.loads(resp.read().decode('utf-8'))
             clients = result.get('clientsNotified', 0)
-            emoji = '👥' if event_type == 'person_entered' else '👋'
-            print(f"{emoji} [ROOM EVENT] {event_type} count={count} (was {previous}) -> {clients} client(s)")
+            print(f"[ROOM EVENT] {event_type} count={count} (was {previous}) -> {clients} client(s)")
             self.room_event_log.append((payload['timestamp'], event_type, count))
             return True
         except Exception as e:
-            print(f"⚠️ [ROOM EVENT FAILED] {e}")
+            print(f"[WARN] [ROOM EVENT FAILED] {e}")
             return False
 
     def send_person_count(self, count, source='webcam'):
@@ -406,10 +405,10 @@ class WebcamSensor:
                 method='POST',
             )
             urllib.request.urlopen(req, timeout=2.0).read()
-            print(f"👥 [ROOM STATE] {count} in view")
+            print(f"[ROOM STATE] {count} in view")
             return True
         except Exception as e:
-            print(f"⚠️ [ROOM STATE FAILED] {e}")
+            print(f"[WARN] [ROOM STATE FAILED] {e}")
             return False
 
     def _detect_swipe(self, results, now):
@@ -481,14 +480,14 @@ class WebcamSensor:
         print("========================================================")
         print(f"Target Server: {self.server_url}")
         print("Select a gesture to dispatch to Vega TV:")
-        print("  [1] Open Palm ✋ (open_palm)")
-        print("  [2] Thumbs Up 👍 (thumbs_up)")
-        print("  [3] Closed Fist ✊ (closed_fist)")
-        print("  [4] Hand Raised ✋ (hand_raised) -> toggles pause/play")
-        print("  [5] Swipe Left ⏪ (swipe_left) -> seek back 5s")
-        print("  [6] Swipe Right ⏩ (swipe_right) -> seek forward 5s")
-        print("  [7] Swipe Up ⬆️ (swipe_up) -> navigate up")
-        print("  [8] Swipe Down ⬇️ (swipe_down) -> navigate down")
+        print("  [1] Open Palm (open_palm)")
+        print("  [2] Thumbs Up (thumbs_up)")
+        print("  [3] Closed Fist (closed_fist)")
+        print("  [4] Hand Raised (hand_raised) -> toggles pause/play")
+        print("  [5] Swipe Left (swipe_left) -> seek back 5s")
+        print("  [6] Swipe Right (swipe_right) -> seek forward 5s")
+        print("  [7] Swipe Up (swipe_up) -> navigate up")
+        print("  [8] Swipe Down (swipe_down) -> navigate down")
         print("  [q] Quit")
         print("--------------------------------------------------------")
 
@@ -553,7 +552,7 @@ class WebcamSensor:
         upper_pixels = int(width * (height * self.upper_zone_fraction))
 
         if not os.path.exists(self.device):
-            print(f"❌ Camera device '{self.device}' not found.")
+            print(f"[FAIL] Camera device '{self.device}' not found.")
             print("Switching to manual fallback mode...")
             self.run_manual_mode()
             return
@@ -603,12 +602,12 @@ class WebcamSensor:
                 env=sub_env
             )
         except Exception as e:
-            print(f"❌ Failed to start GStreamer: {e}")
+            print(f"[FAIL] Failed to start GStreamer: {e}")
             self.run_manual_mode()
             return
 
         if not self.proc or not self.proc.stdout:
-            print("❌ Failed to obtain video stdout pipe.")
+            print("[FAIL] Failed to obtain video stdout pipe.")
             self.run_manual_mode()
             return
 
@@ -648,7 +647,7 @@ class WebcamSensor:
                         self.is_gesture_active = True
                         self.last_trigger_time = now
                         confidence = min(0.99, max(0.85, 0.85 + (delta / 2500.0) * 0.14))
-                        print(f"\n✋ [HEURISTIC DETECTED] Hand Raised! (Skin count: {upper_skin}, Delta: +{int(delta)})")
+                        print(f"\n[HEURISTIC DETECTED] Hand Raised! (Skin count: {upper_skin}, Delta: +{int(delta)})")
                         self.send_event(gesture='hand_raised', confidence=confidence, message='Hand Raised Detected')
                 else:
                     self.consecutive_hits = 0
@@ -695,13 +694,13 @@ class WebcamSensor:
         # Step 1: Verify model asset existence
         if not os.path.exists(self.model_path):
             error_msg = f"Model asset not found at '{self.model_path}'."
-            print(f"❌ [ML INITIALIZATION FAILED] {error_msg}")
+            print(f"[FAIL] [ML INITIALIZATION FAILED] {error_msg}")
             print("Please download the official model with:")
             print("  mkdir -p models && curl -L -o models/gesture_recognizer.task https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task")
             if self.engine == 'mediapipe' and '--engine' in sys.argv:
                 print("Exiting because --engine mediapipe was explicitly requested.")
                 sys.exit(1)
-            print("⚠️ Falling back to heuristic skin-pixel engine...")
+            print("[WARN] Falling back to heuristic skin-pixel engine...")
             self.engine = 'heuristic'
             self.run_heuristic_mode()
             return
@@ -714,14 +713,14 @@ class WebcamSensor:
             mp_python = importlib.import_module('mediapipe.tasks.python')
             mp_vision = importlib.import_module('mediapipe.tasks.python.vision')
         except ImportError as e:
-            print(f"❌ [ML INITIALIZATION FAILED] MediaPipe dependency missing: {e}")
+            print(f"[FAIL] [ML INITIALIZATION FAILED] MediaPipe dependency missing: {e}")
             print(f"Running interpreter: {sys.executable}")
             print("Please install requirements into .venv:")
             print("  .venv/bin/pip install mediapipe opencv-python-headless numpy matplotlib pillow")
             if self.engine == 'mediapipe' and '--engine' in sys.argv:
                 print("Exiting because --engine mediapipe was explicitly requested.")
                 sys.exit(1)
-            print("⚠️ Falling back to heuristic skin-pixel engine...")
+            print("[WARN] Falling back to heuristic skin-pixel engine...")
             self.engine = 'heuristic'
             self.run_heuristic_mode()
             return
@@ -739,12 +738,12 @@ class WebcamSensor:
                 min_tracking_confidence=0.5
             )
             recognizer = mp_vision.GestureRecognizer.create_from_options(options)
-            print("✅ [ML READY] MediaPipe Gesture Recognizer model initialized successfully!")
+            print("[OK] [ML READY] MediaPipe Gesture Recognizer model initialized successfully!")
         except Exception as e:
-            print(f"❌ [ML INITIALIZATION FAILED] Error creating GestureRecognizer: {e}")
+            print(f"[FAIL] [ML INITIALIZATION FAILED] Error creating GestureRecognizer: {e}")
             if self.engine == 'mediapipe' and '--engine' in sys.argv:
                 sys.exit(1)
-            print("⚠️ Falling back to heuristic skin-pixel engine...")
+            print("[WARN] Falling back to heuristic skin-pixel engine...")
             self.engine = 'heuristic'
             self.run_heuristic_mode()
             return
@@ -753,7 +752,7 @@ class WebcamSensor:
         # Optional — if the model is absent the sensor still runs gesture-only.
         pose_landmarker = None
         if not os.path.exists(self.pose_model_path):
-            print(f"⚠️ [PRESENCE] Pose model not found at '{self.pose_model_path}'.")
+            print(f"[WARN] [PRESENCE] Pose model not found at '{self.pose_model_path}'.")
             print("   Room presence detection disabled (gesture control is unaffected).")
             print("   Download it with:")
             print("     curl -L -o models/pose_landmarker_lite.task \\")
@@ -770,9 +769,9 @@ class WebcamSensor:
                     min_tracking_confidence=0.5,
                 )
                 pose_landmarker = mp_vision.PoseLandmarker.create_from_options(pose_options)
-                print(f"✅ [PRESENCE READY] Pose Landmarker · up to {PRESENCE_MAX_POSES} people · sampled every {PRESENCE_FRAME_INTERVAL} frames")
+                print(f"[OK] [PRESENCE READY] Pose Landmarker · up to {PRESENCE_MAX_POSES} people · sampled every {PRESENCE_FRAME_INTERVAL} frames")
             except Exception as e:
-                print(f"⚠️ [PRESENCE] Could not start Pose Landmarker: {e}")
+                print(f"[WARN] [PRESENCE] Could not start Pose Landmarker: {e}")
                 pose_landmarker = None
 
         # Step 4: Video capture pipeline
@@ -781,7 +780,7 @@ class WebcamSensor:
         frame_size = width * height * 3
 
         if not os.path.exists(self.device):
-            print(f"❌ Camera device '{self.device}' not found.")
+            print(f"[FAIL] Camera device '{self.device}' not found.")
             print("Switching to manual fallback mode...")
             self.run_manual_mode()
             return
@@ -821,15 +820,15 @@ class WebcamSensor:
         print(f"Video Device   : {self.device}")
         print(f"Resolution     : {width}x{height} @ 10fps (in-memory)")
         print(f"Min Confidence : {int(self.min_confidence * 100)}%")
-        print(f"Supported ML   : Hand Raised ✋ | Thumbs Up 👍 | Closed Fist ✊ | Swipe ⏪⏩")
+        print(f"Supported ML   : Hand Raised | Thumbs Up | Closed Fist | Swipe")
         print(f"Room Presence  : {'Pose Landmarker · up to ' + str(PRESENCE_MAX_POSES) + ' people' if pose_landmarker is not None else 'DISABLED (pose model missing)'}")
         print(f"Desktop Window : {'ENABLED (Native Popup on Desktop)' if preview_window else 'DISABLED (Headless)'}")
         print(f"Web Dashboard  : {self.server_url}/camera (Live video + landmarks)")
         print(f"Privacy Mode   : 100% Local Inference (Zero cloud/streaming)")
         print("--------------------------------------------------------")
         print("Playback Control:")
-        print("  - Raise an open palm ✋ to toggle PAUSE / PLAY on the TV.")
-        print("  - Swipe your hand ⏪ left to seek back 5s, ⏩ right to seek forward 5s.")
+        print("  - Raise an open palm to toggle PAUSE / PLAY on the TV.")
+        print("  - Swipe your hand left to seek back 5s, right to seek forward 5s.")
         print("Instructions:")
         print("  - Sit facing the laptop camera naturally.")
         print("  - Hand landmarks and skeletons will be highlighted in real time.")
@@ -846,12 +845,12 @@ class WebcamSensor:
                 env=sub_env
             )
         except Exception as e:
-            print(f"❌ Failed to start GStreamer capture: {e}")
+            print(f"[FAIL] Failed to start GStreamer capture: {e}")
             self.run_manual_mode()
             return
 
         if not self.proc or not self.proc.stdout:
-            print("❌ Failed to obtain video capture stdout pipe.")
+            print("[FAIL] Failed to obtain video capture stdout pipe.")
             self.run_manual_mode()
             return
 
@@ -928,21 +927,21 @@ class WebcamSensor:
                 # Swipe detection -> horizontal seek (player) / vertical navigation (home)
                 swipe_gesture = self._detect_swipe(results, now)
                 if swipe_gesture:
-                    swipe_emoji, swipe_desc = SWIPE_LABELS.get(swipe_gesture, ('↔', 'Swipe Detected'))
-                    print(f"\n{swipe_emoji} [ML SWIPE DETECTED] {swipe_desc}")
+                    swipe_desc = SWIPE_LABELS.get(swipe_gesture, 'Swipe Detected')
+                    print(f"\n[ML SWIPE DETECTED] {swipe_desc}")
                     self.send_event(
                         gesture=swipe_gesture,
                         confidence=0.9,
                         handedness=detected_hand,
-                        message=f"{swipe_emoji} {swipe_desc}"
+                        message=swipe_desc
                     )
                     # Don't also emit a hand-raise/gesture toggle from the swipe motion
                     self.swipe_suppress_until = now + SWIPE_SUPPRESS_SEC
 
                 # Gesture mapping and event debouncing
-                mapped_gesture, gesture_desc, gesture_emoji = None, None, None
+                mapped_gesture, gesture_desc = None, None
                 if detected_category and detected_category in GESTURE_MAP:
-                    mapped_gesture, gesture_desc, gesture_emoji = GESTURE_MAP[detected_category]
+                    mapped_gesture, gesture_desc = GESTURE_MAP[detected_category]
 
                 time_since_trigger = now - self.last_trigger_time
 
@@ -962,8 +961,8 @@ class WebcamSensor:
                     if self.consecutive_hits >= self.min_consecutive_frames and not self.is_gesture_active and time_since_trigger > self.cooldown_seconds:
                         self.is_gesture_active = True
                         self.last_trigger_time = now
-                        full_msg = f"{gesture_emoji} {gesture_desc}"
-                        print(f"\n{gesture_emoji} [ML GESTURE DETECTED] {detected_category} ({detected_hand} Hand, Conf: {detected_score*100:.1f}%)")
+                        full_msg = gesture_desc
+                        print(f"\n[ML GESTURE DETECTED] {detected_category} ({detected_hand} Hand, Conf: {detected_score*100:.1f}%)")
                         self.send_event(gesture=mapped_gesture, confidence=detected_score, handedness=detected_hand, message=full_msg)
                 else:
                     self.neutral_frames += 1
@@ -1009,7 +1008,7 @@ class WebcamSensor:
                             'Content-Type': 'image/jpeg',
                             'X-Engine': 'mediapipe',
                             'X-Gesture': mapped_gesture if (self.is_gesture_active or (mapped_gesture and self.consecutive_hits >= 2)) else '',
-                            'X-Message': f"{gesture_emoji} {gesture_desc}" if (mapped_gesture and gesture_emoji) else '',
+                            'X-Message': gesture_desc if mapped_gesture else '',
                             'X-Confidence': f"{detected_score:.2f}",
                             'X-Handedness': detected_hand,
                             'X-Person-Count': str(self.person_count),

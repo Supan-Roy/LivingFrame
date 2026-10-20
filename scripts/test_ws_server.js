@@ -203,7 +203,7 @@ function recordRoomEvent(payload) {
 // Create HTTP server
 const server = http.createServer((req, res) => {
   const url = req.url || '/';
-  
+
   // Health check
   if (url === '/health' || url === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -350,6 +350,13 @@ const server = http.createServer((req, res) => {
       align-items: center;
       justify-content: center;
     }
+    .badge-diamond {
+      width: 13px;
+      height: 13px;
+      border: 2px solid #00E5FF;
+      border-radius: 2px;
+      transform: rotate(45deg);
+    }
     h1 { font-size: 18px; font-weight: 800; letter-spacing: 1px; color: #FFFFFF; }
     h1 span { color: #00E5FF; }
     .subtitle { font-size: 11px; color: #94A3B8; letter-spacing: 0.5px; }
@@ -494,7 +501,7 @@ const server = http.createServer((req, res) => {
 <body>
   <div class="header">
     <div class="title-row">
-      <div class="badge">❖</div>
+      <div class="badge"><span class="badge-diamond"></span></div>
       <div>
         <h1>LIVING<span>FRAME</span></h1>
         <div class="subtitle">ROOM SENSOR — MEDIAPIPE GESTURE RECOGNIZER</div>
@@ -510,10 +517,10 @@ const server = http.createServer((req, res) => {
     <div class="video-viewport">
       <img id="camera-feed" src="/camera/frame" alt="Webcam Feed Loading..." onerror="this.style.opacity='0.5'" onload="this.style.opacity='1'" />
       <div class="detection-zone">
-        <span id="zone-label" class="zone-label">🤖 MEDIAPIPE ML ACTIVE (FULL FRAME HAND TRACKING)</span>
+        <span id="zone-label" class="zone-label">MEDIAPIPE ML ACTIVE (FULL FRAME HAND TRACKING)</span>
       </div>
       <div id="alert-banner" class="alert-banner">
-        ✋ GESTURE DETECTED • SENT TO VEGA TV
+        GESTURE DETECTED • SENT TO VEGA TV
       </div>
     </div>
 
@@ -549,13 +556,13 @@ const server = http.createServer((req, res) => {
   <div class="footer">
     <span>Privacy Mode: 100% Local Inference (Zero cloud streaming)</span>
     <div style="display: flex; gap: 8px;">
-      <button class="btn-manual" onclick="fetch('/gesture/hand_raised').then(r=>r.json()).then(d=>console.log(d))">✋ Hand Raised</button>
-      <button class="btn-manual" onclick="fetch('/gesture/swipe_left').then(r=>r.json()).then(d=>console.log(d))">⏪ Swipe Left</button>
-      <button class="btn-manual" onclick="fetch('/gesture/swipe_right').then(r=>r.json()).then(d=>console.log(d))">⏩ Swipe Right</button>
-      <button class="btn-manual" onclick="fetch('/gesture/thumbs_up').then(r=>r.json()).then(d=>console.log(d))">👍 Thumbs Up</button>
-      <button class="btn-manual" onclick="fetch('/gesture/closed_fist').then(r=>r.json()).then(d=>console.log(d))">✊ Closed Fist</button>
-      <button class="btn-manual" onclick="fetch('/room/person_entered').then(r=>r.json()).then(d=>console.log(d))">👥 Person Entered</button>
-      <button class="btn-manual" onclick="fetch('/room/person_left').then(r=>r.json()).then(d=>console.log(d))">👋 Person Left</button>
+      <button class="btn-manual" onclick="fetch('/gesture/hand_raised').then(r=>r.json()).then(d=>console.log(d))">Hand Raised</button>
+      <button class="btn-manual" onclick="fetch('/gesture/swipe_left').then(r=>r.json()).then(d=>console.log(d))">Swipe Left</button>
+      <button class="btn-manual" onclick="fetch('/gesture/swipe_right').then(r=>r.json()).then(d=>console.log(d))">Swipe Right</button>
+      <button class="btn-manual" onclick="fetch('/gesture/thumbs_up').then(r=>r.json()).then(d=>console.log(d))">Thumbs Up</button>
+      <button class="btn-manual" onclick="fetch('/gesture/closed_fist').then(r=>r.json()).then(d=>console.log(d))">Closed Fist</button>
+      <button class="btn-manual" onclick="fetch('/room/person_entered').then(r=>r.json()).then(d=>console.log(d))">Person Entered</button>
+      <button class="btn-manual" onclick="fetch('/room/person_left').then(r=>r.json()).then(d=>console.log(d))">Person Left</button>
     </div>
   </div>
 
@@ -584,15 +591,13 @@ const server = http.createServer((req, res) => {
         metricEngine.innerText = (data.engine === 'mediapipe' ? 'MediaPipe ML' : 'Heuristic');
         metricFps.innerText = (data.fps || 10).toFixed(1) + ' fps';
         metricPeople.innerText = String(data.personCount || 0);
-        
+
         if (data.activeGesture && data.activeGesture !== 'None') {
-          const emojiMap = { open_palm: '✋', hand_raised: '✋', thumbs_up: '👍', closed_fist: '✊', point_to_screen: '👆', victory: '✌️', swipe_left: '⏪', swipe_right: '⏩' };
-          const emoji = emojiMap[data.activeGesture] || '✋';
           const label = data.activeGesture.replace(/_/g, ' ').toUpperCase();
-          metricGesture.innerText = emoji + ' ' + label;
+          metricGesture.innerText = label;
           metricConf.innerText = data.confidence ? (data.confidence * 100).toFixed(1) + '%' : '--';
-          
-          alertBanner.innerText = emoji + ' ' + label + ' DETECTED • SENT TO VEGA TV';
+
+          alertBanner.innerText = label + ' DETECTED • SENT TO VEGA TV';
           alertBanner.style.display = 'block';
           if (alertTimer) clearTimeout(alertTimer);
           alertTimer = setTimeout(() => { alertBanner.style.display = 'none'; }, 2500);

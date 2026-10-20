@@ -10,6 +10,7 @@ import {
 import {TVFocusGuideView} from '@amazon-devices/react-native-kepler';
 import {MediaItem} from '../types/catalog';
 import {colors} from '../theme/theme';
+import {Icon} from './Icon';
 
 export interface TitleDetailsModalProps {
   item: MediaItem | null;
@@ -59,7 +60,8 @@ export const TitleDetailsModal = ({
                   </Text>
                 </View>
                 <View style={styles.ratingBadge}>
-                  <Text style={styles.ratingText}>★ {item.ratingStars.toFixed(1)}</Text>
+                  <Icon name="spark" size={9} color={colors.accentGold} />
+                  <Text style={styles.ratingText}>{item.ratingStars.toFixed(1)}</Text>
                 </View>
               </View>
               <Text style={styles.title}>{item.title}</Text>
@@ -76,7 +78,10 @@ export const TitleDetailsModal = ({
 
             {item.aiContextHint && (
               <View style={styles.roomContextCard}>
-                <Text style={styles.roomContextTitle}>⚡ LIVINGFRAME ROOM AWARENESS</Text>
+                <View style={styles.roomContextTitleRow}>
+                  <Icon name="spark" size={10} color={colors.accentOrange} />
+                  <Text style={styles.roomContextTitle}>LIVINGFRAME ROOM AWARENESS</Text>
+                </View>
                 <Text style={styles.roomContextBody}>
                   {item.aiContextHint}
                 </Text>
@@ -100,7 +105,10 @@ export const TitleDetailsModal = ({
                 accessibilityRole="button"
                 accessibilityLabel={`Play ${item.title}`}
                 hasTVPreferredFocus>
-                <Text style={styles.primaryBtnText}>▶ Play Title</Text>
+                <View style={styles.btnIcon}>
+                  <Icon name="play" size={12} color="#000000" />
+                </View>
+                <Text style={styles.primaryBtnText}>Play Title</Text>
               </Pressable>
 
               <Pressable
@@ -114,7 +122,10 @@ export const TitleDetailsModal = ({
                 onPress={() => onRoomRecap(item)}
                 accessibilityRole="button"
                 accessibilityLabel="Catch Me Up Room Recap">
-                <Text style={styles.aiBtnText}>⚡ Room AI Recap</Text>
+                <View style={styles.btnIcon}>
+                  <Icon name="spark" size={12} color={colors.accentOrange} />
+                </View>
+                <Text style={styles.aiBtnText}>Room AI Recap</Text>
               </Pressable>
 
               <Pressable
@@ -128,7 +139,10 @@ export const TitleDetailsModal = ({
                 onPress={onClose}
                 accessibilityRole="button"
                 accessibilityLabel="Back to Browse">
-                <Text style={styles.secondaryBtnText}>← Back to Browse</Text>
+                <View style={styles.btnIcon}>
+                  <Icon name="chevron-left" size={12} color="#FFFFFF" />
+                </View>
+                <Text style={styles.secondaryBtnText}>Back to Browse</Text>
               </Pressable>
             </TVFocusGuideView>
           </ScrollView>
@@ -190,6 +204,9 @@ const styles = StyleSheet.create({
     color: '#000000',
   },
   ratingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: 'rgba(245, 158, 11, 0.25)',
     borderWidth: 1,
     borderColor: colors.accentGold,
@@ -236,12 +253,17 @@ const styles = StyleSheet.create({
     borderLeftColor: colors.accentOrange,
     marginBottom: 24,
   },
+  roomContextTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
   roomContextTitle: {
     fontSize: 12,
     fontWeight: '800',
     color: colors.accentOrange,
     letterSpacing: 0.8,
-    marginBottom: 4,
   },
   roomContextBody: {
     fontSize: 14,
@@ -260,10 +282,15 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   btn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 22,
     paddingVertical: 12,
     borderRadius: 8,
     marginRight: 14,
+  },
+  btnIcon: {
+    marginRight: 8,
   },
   primaryBtn: {
     backgroundColor: colors.primary,

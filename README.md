@@ -1,4 +1,4 @@
-# LivingFrame ❖
+# LivingFrame
 ### AI-Enhanced Living Room Viewing Experience on Amazon Vega OS
 **Amazon Build, Ship, Shape: Amazon Developer Hackathon 2026 (Fire TV Track)**
 
@@ -30,8 +30,8 @@ LivingFrame operates across a unified local mesh connecting the Vega Virtual Dev
  │  ┌───────────────────────┐       ┌───────────────────────┐  │
  │  │   Metro Bundler       │       │ Video & WS Server     │  │
  │  │   Port 8081           │       │ Port 8080             │  │
- │  │   (react-native start)│       │ (test_ws_server.js)   │  │
- │  └───────────▲───────────┘       └───────────▲───────────┘  │
+ │  │  (react-native start)│       │ (test_ws_server.js)   │  │
+ │  └──────────────────────┘       └──────────────────────┘  │
  │              │                               │              │
  │              │ (JS Bundle)                   │ (MP4 Stream  │
  │              │                               │  & WS Events)│
@@ -44,7 +44,7 @@ LivingFrame operates across a unified local mesh connecting the Vega Virtual Dev
  │  │   ├── VideoPlayerView (VideoPlayer + SurfaceView)     │  │
  │  │   └── RoomContext (WebSocket Client -> 10.0.2.2:8080) │  │
  │  └───────────────────────────────────────────────────────┘  │
- │                              ▲                              │
+ │                              │
  │                              │ (Telemetry & Frames)         │
  │  ┌───────────────────────────┴───────────────────────────┐  │
  │  │   Vision Sensor Pipeline (MediaPipe Gesture Engine)   │  │
@@ -157,7 +157,7 @@ npm start
 ### Optional Step 4: Laptop Camera AI Vision Sensor (Gesture Control)
 The webcam + MediaPipe pipeline can be launched either from the TV or from the CLI:
 
-**From the TV (recommended):** open any video and toggle the **🎥 GESTURES OFF / ON** button in the
+**From the TV (recommended):** open any video and toggle the **GESTURES OFF / ON** button in the
 player header. Turning it **ON** starts the real sensor process (and pops up the native camera
 preview window on the laptop); turning it **OFF** stops the process and releases the camera. The
 button reflects the live state reported by the server.
@@ -227,12 +227,12 @@ npm test -- --runInBand
 | **Space / Return / Select** | Play / Pause toggle |
 | **Arrow Left / Rewind Key** | Rewind 10 seconds (smooth seek bar update) |
 | **Arrow Right / Fast-Forward** | Fast-Forward 10 seconds |
-| **Button: Restart (↺)** | Resets video to `00:00` and resumes playback |
-| **Button: Room Context (⚡)** | Opens live ambient room context recap overlay |
-| **Button: Gesture Control (🎥 GESTURES OFF/ON)** | Starts / stops the real webcam + MediaPipe sensor. When ON, hand gestures control playback |
-| **Gesture: Raise Hand (✋)** | *(gesture control ON)* Toggles Play / Pause |
-| **Gesture: Swipe Left / Right (⏪ ⏩)** | *(gesture control ON)* Seek back / forward 5 seconds |
-| **Button: Back (←)** / **ESC** | Exits video player and returns to browse screen |
+| **Button: Restart** | Resets video to `00:00` and resumes playback |
+| **Button: Room Context** | Opens live ambient room context recap overlay |
+| **Button: Gesture Control (GESTURES OFF/ON)** | Starts / stops the real webcam + MediaPipe sensor. When ON, hand gestures control playback |
+| **Gesture: Raise Hand** | *(gesture control ON)* Toggles Play / Pause |
+| **Gesture: Swipe Left / Right** | *(gesture control ON)* Seek back / forward 5 seconds |
+| **Button: Back** / **ESC** | Exits video player and returns to browse screen |
 
 ---
 
@@ -287,7 +287,7 @@ labels manual events as `manual trigger` so they are distinguishable from real d
 2. In the player, turn **FAMILY ON**.
 3. Let a second person enter (or trigger `person_entered`) — the dashboard logs the event.
 4. The TV pauses, blacks out, and explains why.
-5. Trigger `person_left` → playback resumes automatically.
+5. Trigger `person_left` playback resumes automatically.
 6. Turn **FAMILY OFF** and repeat: playback continues untouched.
 
 **Tests:** `npm test -- --runInBand` (scene-policy + catalog metadata) and

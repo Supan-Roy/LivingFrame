@@ -129,13 +129,17 @@ describe('Gesture playback control', () => {
       'Play video',
     );
     expect(screen.getByTestId('player-center-status')).toBeTruthy();
-    expect(screen.getByText('Pause')).toBeTruthy();
+    expect(screen.getByTestId('player-center-status-text').props.children).toBe(
+      'Pause',
+    );
 
     fireGesture('hand_raised');
     expect(screen.getByTestId('btn-player-toggle').props.accessibilityLabel).toBe(
       'Pause video',
     );
-    expect(screen.getByText('Play')).toBeTruthy();
+    expect(screen.getByTestId('player-center-status-text').props.children).toBe(
+      'Play',
+    );
   });
 
   it('seeks forward and back 5s on swipe gestures', async () => {

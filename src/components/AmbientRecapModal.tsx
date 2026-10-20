@@ -9,6 +9,7 @@ import {TVFocusGuideView} from '@amazon-devices/react-native-kepler';
 import {MediaItem} from '../types/catalog';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
+import {Icon} from './Icon';
 
 export interface AmbientRecapModalProps {
   item: MediaItem | null;
@@ -34,7 +35,7 @@ export const AmbientRecapModal = ({
           {/* Header */}
           <View style={styles.recapHeader}>
             <View style={styles.aiGlowIcon}>
-              <Text style={styles.glowIconText}>⚡</Text>
+              <Icon name="spark" size={20} color={colors.accentOrange} />
             </View>
             <View>
               <Text style={styles.recapHeaderTitle}>
@@ -60,7 +61,7 @@ export const AmbientRecapModal = ({
               </Text>
               <View style={styles.keyCluePill}>
                 <Text style={styles.keyClueText}>
-                  💡 Viewer Note: High conversational engagement detected in room. Tone adapted to shared entertainment.
+                  Viewer Note: High conversational engagement detected in room. Tone adapted to shared entertainment.
                 </Text>
               </View>
             </View>
@@ -73,7 +74,7 @@ export const AmbientRecapModal = ({
                 </Text>
               </View>
               <Text style={styles.gestureHintText}>
-                Raise hand ✋ to bring up character bio anytime
+                Raise hand to bring up character bio anytime
               </Text>
             </View>
           </View>
@@ -129,10 +130,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
-  },
-  glowIconText: {
-    fontSize: 22,
-    color: colors.accentOrange,
   },
   recapHeaderTitle: {
     fontSize: 24,

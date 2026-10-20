@@ -9,6 +9,7 @@ import {TVFocusGuideView} from '@amazon-devices/react-native-kepler';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
 import {RoomGestureType} from '../types/room';
+import {Icon} from './Icon';
 
 interface GestureReactionOverlayProps {
   onOpenRecap?: () => void;
@@ -38,49 +39,49 @@ export const GestureReactionOverlay = ({
       case 'open_palm':
       case 'hand_raised':
         return {
-          icon: '✋',
+          iconName: 'spark' as const,
           title: 'OPEN-PALM DETECTED',
           subtitle: 'Room vision detected viewer engagement • Quick recap available',
         };
       case 'thumbs_up':
         return {
-          icon: '👍',
+          iconName: 'spark' as const,
           title: 'THUMBS-UP DETECTED',
           subtitle: 'Viewer liked current spotlight • Reaction registered',
         };
       case 'closed_fist':
         return {
-          icon: '✊',
+          iconName: 'spark' as const,
           title: 'CLOSED-FIST DETECTED',
           subtitle: 'Room vision detected focus hold • Spotlight locked',
         };
       case 'point_to_screen':
         return {
-          icon: '👆',
+          iconName: 'info' as const,
           title: 'POINTING DETECTED',
           subtitle: 'Viewer pointing to screen • Detail inspected',
         };
       case 'victory':
         return {
-          icon: '✌️',
+          iconName: 'spark' as const,
           title: 'VICTORY DETECTED',
           subtitle: 'Viewer celebration detected • Highlights available',
         };
       case 'swipe_left':
         return {
-          icon: '⏪',
+          iconName: 'rewind' as const,
           title: 'SWIPE LEFT DETECTED',
           subtitle: 'Viewer swiped left • Seeking back 5 seconds',
         };
       case 'swipe_right':
         return {
-          icon: '⏩',
+          iconName: 'forward' as const,
           title: 'SWIPE RIGHT DETECTED',
           subtitle: 'Viewer swiped right • Seeking forward 5 seconds',
         };
       default:
         return {
-          icon: '✋',
+          iconName: 'spark' as const,
           title: 'GESTURE DETECTED',
           subtitle: 'Room vision detected viewer interaction',
         };
@@ -95,7 +96,7 @@ export const GestureReactionOverlay = ({
         {/* Glow Header Row */}
         <View style={styles.cardHeader}>
           <View style={styles.gestureIconBadge}>
-            <Text style={styles.gestureIcon}>{gestureMeta.icon}</Text>
+            <Icon name={gestureMeta.iconName} size={22} color={colors.primary} />
           </View>
           <View style={styles.headerTextCol}>
             <View style={styles.titleRow}>
@@ -119,7 +120,10 @@ export const GestureReactionOverlay = ({
             accessibilityRole="button"
             accessibilityLabel="Open Context Recap"
             testID="gesture-open-recap-btn">
-            <Text style={styles.actionBtnText}>⚡ Open Context Recap</Text>
+            <View style={styles.btnIcon}>
+              <Icon name="spark" size={11} color="#000000" />
+            </View>
+            <Text style={styles.actionBtnText}>Open Context Recap</Text>
           </Pressable>
 
           <Pressable
@@ -128,7 +132,10 @@ export const GestureReactionOverlay = ({
             accessibilityRole="button"
             accessibilityLabel="Dismiss Alert"
             testID="gesture-dismiss-btn">
-            <Text style={styles.dismissBtnText}>✕ Dismiss</Text>
+            <View style={styles.btnIcon}>
+              <Icon name="close" size={10} color="#E2E8F0" />
+            </View>
+            <Text style={styles.dismissBtnText}>Dismiss</Text>
           </Pressable>
         </TVFocusGuideView>
       </View>
@@ -171,9 +178,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
-  },
-  gestureIcon: {
-    fontSize: 26,
   },
   headerTextCol: {
     flex: 1,
@@ -225,10 +229,15 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.primary,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 8,
+  },
+  btnIcon: {
+    marginRight: 6,
   },
   actionBtnFocused: {
     borderWidth: 2,
@@ -241,6 +250,8 @@ const styles = StyleSheet.create({
     color: '#000000',
   },
   dismissBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: 12,
     paddingVertical: 8,

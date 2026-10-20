@@ -3,6 +3,7 @@ import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
 import {HEADER_TOGGLE_ID} from '../navigation/focusGrid';
+import {Icon} from './Icon';
 
 export const Header = () => {
   const {roomState, setGesturesEnabled, setFamilyMode} = useRoom();
@@ -12,7 +13,7 @@ export const Header = () => {
       {/* Brand & Wordmark */}
       <View style={styles.brandRow}>
         <View style={styles.logoBadge}>
-          <Text style={styles.logoIcon}>❖</Text>
+          <Icon name="brand" size={18} color={colors.primary} />
         </View>
         <View style={styles.wordmarkContainer}>
           <Text style={styles.wordmarkTitle} testID="header-brand-title">
@@ -37,7 +38,13 @@ export const Header = () => {
               : 'Turn on gesture control'
           }
           testID={HEADER_TOGGLE_ID}>
-          <Text style={styles.gestureToggleIcon}>🎥</Text>
+          <View style={styles.switchIcon}>
+            <Icon
+              name="camera"
+              size={14}
+              color={roomState.gesturesEnabled ? '#6EE7B7' : '#94A3B8'}
+            />
+          </View>
           <Text
             style={[
               styles.gestureToggleText,
@@ -60,7 +67,13 @@ export const Header = () => {
               : 'Turn on Family Mode'
           }
           testID="header-family-toggle">
-          <Text style={styles.gestureToggleIcon}>👨‍👩‍👧</Text>
+          <View style={styles.switchIcon}>
+            <Icon
+              name="family"
+              size={14}
+              color={roomState.familyModeEnabled ? '#FDE68A' : '#94A3B8'}
+            />
+          </View>
           <Text
             style={[
               styles.gestureToggleText,
@@ -98,11 +111,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
-  },
-  logoIcon: {
-    fontSize: 20,
-    color: colors.primary,
-    fontWeight: 'bold',
   },
   wordmarkContainer: {
     justifyContent: 'center',
@@ -142,8 +150,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(16, 185, 129, 0.2)',
     borderColor: 'rgba(16, 185, 129, 0.6)',
   },
-  gestureToggleIcon: {
-    fontSize: 14,
+  switchIcon: {
     marginRight: 8,
   },
   gestureToggleText: {

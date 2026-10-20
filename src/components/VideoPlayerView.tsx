@@ -22,6 +22,7 @@ import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
 import {findBlockingSegment} from '../room/scenePolicy';
 import {GestureReactionOverlay} from './GestureReactionOverlay';
+import {Icon} from './Icon';
 
 export interface VideoPlayerViewProps {
   item: MediaItem | null;
@@ -499,7 +500,7 @@ export const VideoPlayerView = ({
       }
       setProtectionArmed(true);
       setProtectionOverride(false);
-      showRoomNotice('👤 Someone joined the room · Family Mode active');
+      showRoomNotice('Someone joined the room · Family Mode active');
     } else if (event.type === 'person_left') {
       setProtectionArmed(false);
     }
@@ -570,10 +571,10 @@ export const VideoPlayerView = ({
       showGestureFeedback(isPlayingRef.current ? 'Play' : 'Pause');
     } else if (gesture === 'swipe_left') {
       seekRelative(-GESTURE_SEEK_STEP_SEC);
-      showGestureFeedback('⏪  Rewind');
+      showGestureFeedback('Rewind');
     } else if (gesture === 'swipe_right') {
       seekRelative(GESTURE_SEEK_STEP_SEC);
-      showGestureFeedback('⏩  Forward');
+      showGestureFeedback('Forward');
     }
   }, [
     roomState.lastEvent,
@@ -696,7 +697,11 @@ export const VideoPlayerView = ({
           pointerEvents="none"
           testID="player-center-status">
           <View style={styles.centerStatusBadge}>
-            <Text style={styles.centerStatusText}>{gestureFeedback ?? 'Pause'}</Text>
+            <Text
+              style={styles.centerStatusText}
+              testID="player-center-status-text">
+              {gestureFeedback ?? 'Pause'}
+            </Text>
           </View>
         </View>
       )}
@@ -742,8 +747,20 @@ export const VideoPlayerView = ({
                 accessibilityRole="button"
                 accessibilityLabel="Back to Browse"
                 testID="btn-player-back">
-                <Text style={styles.hudButtonIcon}>←</Text>
-                <Text style={styles.hudButtonText}>Back to Browse</Text>
+                <View style={styles.hudButtonIcon}>
+                  <Icon
+                    name="chevron-left"
+                    size={14}
+                    color={focusedControl === 'back' ? '#0F172A' : '#F8FAFC'}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.hudButtonText,
+                    focusedControl === 'back' && styles.controlBtnTextFocused,
+                  ]}>
+                  Back to Browse
+                </Text>
               </Pressable>
 
               <View style={styles.titleGroup}>
@@ -796,7 +813,13 @@ export const VideoPlayerView = ({
                     : 'Turn on gesture control'
                 }
                 testID="btn-player-gesture-toggle">
-                <Text style={styles.visionToggleIcon}>🎥</Text>
+                <View style={styles.visionToggleIcon}>
+                  <Icon
+                    name="camera"
+                    size={14}
+                    color={roomState.gesturesEnabled ? '#6EE7B7' : '#94A3B8'}
+                  />
+                </View>
                 <Text
                   style={[
                     styles.visionToggleText,
@@ -825,7 +848,13 @@ export const VideoPlayerView = ({
                     : 'Turn on Family Mode'
                 }
                 testID="btn-player-family-toggle">
-                <Text style={styles.visionToggleIcon}>👨‍👩‍👧</Text>
+                <View style={styles.visionToggleIcon}>
+                  <Icon
+                    name="family"
+                    size={14}
+                    color={roomState.familyModeEnabled ? '#FDE68A' : '#94A3B8'}
+                  />
+                </View>
                 <Text
                   style={[
                     styles.visionToggleText,
@@ -878,8 +907,15 @@ export const VideoPlayerView = ({
                 accessibilityRole="button"
                 accessibilityLabel={isPlaying ? 'Pause video' : 'Play video'}
                 testID="btn-player-toggle">
+                <View style={styles.controlIcon}>
+                  <Icon
+                    name={isPlaying ? 'pause' : 'play'}
+                    size={13}
+                    color="#0F172A"
+                  />
+                </View>
                 <Text style={styles.primaryControlBtnText}>
-                  {isPlaying ? '⏸  Pause' : '▶  Resume'}
+                  {isPlaying ? 'Pause' : 'Resume'}
                 </Text>
               </Pressable>
 
@@ -896,7 +932,20 @@ export const VideoPlayerView = ({
                 accessibilityRole="button"
                 accessibilityLabel="Restart video from beginning"
                 testID="btn-player-restart">
-                <Text style={styles.controlBtnText}>↺  Restart</Text>
+                <View style={styles.controlIcon}>
+                  <Icon
+                    name="restart"
+                    size={13}
+                    color={focusedControl === 'restart' ? '#0F172A' : '#F8FAFC'}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.controlBtnText,
+                    focusedControl === 'restart' && styles.controlBtnTextFocused,
+                  ]}>
+                  Restart
+                </Text>
               </Pressable>
 
               <Pressable
@@ -916,8 +965,20 @@ export const VideoPlayerView = ({
                 accessibilityRole="button"
                 accessibilityLabel="Open ambient room context recap"
                 testID="btn-player-recap">
-                <Text style={styles.recapBtnIcon}>⚡</Text>
-                <Text style={styles.recapBtnText}>Room Context</Text>
+                <View style={styles.recapBtnIcon}>
+                  <Icon
+                    name="spark"
+                    size={12}
+                    color={focusedControl === 'recap' ? '#0F172A' : '#F59E0B'}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.recapBtnText,
+                    focusedControl === 'recap' && styles.controlBtnTextFocused,
+                  ]}>
+                  Room Context
+                </Text>
               </Pressable>
             </TVFocusGuideView>
           </View>
@@ -945,7 +1006,10 @@ export const VideoPlayerView = ({
                 accessibilityRole="button"
                 accessibilityLabel="Resume anyway"
                 testID="btn-protection-resume">
-                <Text style={styles.protectionResumeText}>▶  Resume anyway</Text>
+                <View style={styles.protectionResumeIcon}>
+                  <Icon name="play" size={13} color="#0F172A" />
+                </View>
+                <Text style={styles.protectionResumeText}>Resume anyway</Text>
               </Pressable>
             </TVFocusGuideView>
           </View>
@@ -1080,10 +1144,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   protectionResumeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 10,
+  },
+  protectionResumeIcon: {
+    marginRight: 8,
   },
   protectionResumeText: {
     color: '#0F172A',
@@ -1136,10 +1205,7 @@ const styles = StyleSheet.create({
     transform: [{scale: 1.05}],
   },
   hudButtonIcon: {
-    fontSize: 18,
-    color: '#F8FAFC',
     marginRight: 8,
-    fontWeight: '700',
   },
   hudButtonText: {
     fontSize: 15,
@@ -1244,7 +1310,6 @@ const styles = StyleSheet.create({
     transform: [{scale: 1.05}],
   },
   visionToggleIcon: {
-    fontSize: 14,
     marginRight: 8,
   },
   visionToggleText: {
@@ -1323,6 +1388,9 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.15)',
     marginRight: 16,
   },
+  controlIcon: {
+    marginRight: 8,
+  },
   controlBtnFocused: {
     backgroundColor: '#FFFFFF',
     borderColor: colors.accentGold,
@@ -1332,6 +1400,9 @@ const styles = StyleSheet.create({
     color: '#F8FAFC',
     fontSize: 15,
     fontWeight: '700',
+  },
+  controlBtnTextFocused: {
+    color: '#0F172A',
   },
   primaryControlBtn: {
     backgroundColor: colors.accentGold,
@@ -1348,8 +1419,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245, 158, 11, 0.4)',
   },
   recapBtnIcon: {
-    fontSize: 16,
-    color: '#F59E0B',
     marginRight: 8,
   },
   recapBtnText: {

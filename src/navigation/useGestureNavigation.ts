@@ -74,7 +74,7 @@ export const useGestureNavigation = ({
     if (gesture === 'thumbs_up') {
       activatePosition(grid, cursor.current);
       // Consume the gesture: otherwise it lingers in activeGesture and the player,
-      // mounting right after, pops its own "thumbs-up → recap" card for the same
+      // mounting right after, pops its own "thumbs-up -> recap" card for the same
       // gesture that just opened the video.
       dismissGesture();
     }

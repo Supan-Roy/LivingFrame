@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import {MediaItem} from '../types/catalog';
 import {colors, spacing} from '../theme/theme';
+import {Icon} from './Icon';
 
 export interface ContentCardProps {
   item: MediaItem;
@@ -58,7 +59,8 @@ export const ContentCard = React.forwardRef<View, ContentCardProps>(
           {/* Trending or Content Rating Badge */}
           {item.trending && (
             <View style={styles.trendingBadge}>
-              <Text style={styles.trendingBadgeText}>★ TRENDING</Text>
+              <Icon name="spark" size={8} color="#000000" />
+              <Text style={styles.trendingBadgeText}>TRENDING</Text>
             </View>
           )}
         </View>
@@ -129,6 +131,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     left: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: 'rgba(245, 158, 11, 0.92)',
     paddingHorizontal: 7,
     paddingVertical: 3,

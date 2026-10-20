@@ -151,7 +151,7 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
               sensorStatus: 'active',
               activeGesture: gestureType,
               gestureTimestamp: receivedTimestamp,
-              lastTestMessage: `✋ ${message}`,
+              lastTestMessage: message,
               lastTestTimestamp: receivedTimestamp,
               lastEvent: {
                 id: `evt-${Date.now()}-${++eventSeqRef.current}`,
