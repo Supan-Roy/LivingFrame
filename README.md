@@ -254,15 +254,33 @@ If it is missing, gesture control still works and presence detection is simply d
 
 **Family Mode.** Enable it from the **home-screen top bar** or the **player header** — both
 switches control the same preference. While Family Mode is on, the sensor estimates whether a
-**child** is in view from body proportions (head width vs shoulder width). If a child enters —
-or was already present — playback of a scene tagged in the asset's metadata **pauses**, the
-picture is covered, and a warning explains why. Playback resumes when the child is no longer
-detected, or via *Resume anyway*. With Family Mode off, playback is completely unaffected.
+**child** is in view. If a child enters — or was already present — playback of a scene tagged
+in the asset's metadata **pauses**, the picture is covered, and a warning explains why.
+Playback resumes when the child is no longer detected, or via *Resume anyway*. With Family
+Mode off, playback is completely unaffected.
 
-> The child signal is an **estimate from pose landmarks**, not identity and not a certainty.
-> No face images, recognition, or age model are used. It can misfire — e.g. someone turned
-> sideways, or a short adult — and Family Mode deliberately errs toward pausing rather than
-> assuming an adult. The stats panel shows `Child present (est.)` so this is visible.
+**How the child signal works.** MediaPipe's BlazeFace detector finds faces in the existing
+camera frames; each face crop is classified into an age bracket by the
+**GoogLeNet/Adience age model** (`age_googlenet.onnx`, Apache-2.0) running through OpenCV's
+DNN module — no extra runtime dependency. Brackets `(0-2)`, `(4-6)`, `(8-12)` count as child;
+their probability mass is median-smoothed and gated with hysteresis (on ≥ 0.55, off ≤ 0.35)
+plus 3-sample confirmation. If no face is visible, the sensor falls back to a pose
+head/shoulder ratio heuristic.
+
+> This is an **age estimate**, not identity verification. Face crops are processed in memory
+> only — never stored or transmitted. Accuracy drops for small or blurry faces (the camera is
+> 320×240) and around the 15–20 bracket, so it can misfire; Family Mode errs toward pausing.
+> The stats panel shows `Child present (est.)`, and the sensor heartbeat prints the predicted
+> bracket and probability (`Child: age p=0.12 (25-32)`).
+
+Download the two models once:
+
+```bash
+curl -L -o models/age_googlenet.onnx \
+  https://huggingface.co/onnxmodelzoo/age_googlenet/resolve/main/age_googlenet.onnx
+curl -L -o models/blaze_face_short_range.tflite \
+  https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite
+```
 
 **Two switches, one camera.** Gesture control and Family Mode are independent preferences
 that share the webcam sensor: it runs while **either** is on, and each switch only gates its

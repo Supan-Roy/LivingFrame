@@ -35,6 +35,8 @@ __pycache__/
 .venv/
 venv/
 models/*.task
+models/*.onnx
+models/*.tflite
 
 # Camera captures, test media, and recordings
 *.jpg

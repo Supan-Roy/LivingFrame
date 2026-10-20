@@ -154,18 +154,52 @@ check(
 
 print("\n== ChildPresenceDecider (median + hysteresis) ==")
 adult = w.ChildPresenceDecider()
-adult_states = [adult.add_ratio(r) for r in (0.38, 0.44, 0.49, 0.42, 0.32, 0.45, 0.31)]
+adult_states = [adult.add_value(r) for r in (0.38, 0.44, 0.49, 0.42, 0.32, 0.45, 0.31)]
 check("adult ratio noise never flags a child", any(adult_states), False)
 
 child = w.ChildPresenceDecider()
-child_states = [child.add_ratio(r) for r in (0.58, 0.60, 0.55, 0.62)]
+child_states = [child.add_value(r) for r in (0.58, 0.60, 0.55, 0.62)]
 check("sustained high ratios flag a child", child_states[-1], True)
 
-kept = child.add_ratio(0.45)
+kept = child.add_value(0.45)
 check("hysteresis keeps the state between thresholds", kept, True)
 
-cleared = [child.add_ratio(0.30) for _ in range(5)]
+cleared = [child.add_value(0.30) for _ in range(5)]
 check("sustained low ratios clear the child state", cleared[-1], False)
+
+print("\n== Age model helpers ==")
+probs = w.softmax([0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0])
+check(
+    "softmax peaks at the (25-32) bracket",
+    w.AGE_CLASSES[probs.index(max(probs))],
+    "(25-32)",
+)
+check("softmax sums to 1", round(sum(probs), 6), 1.0)
+
+child_probs = [0.2, 0.25, 0.2, 0.1, 0.1, 0.05, 0.05, 0.05]
+check(
+    "child probability sums the three child brackets",
+    round(w.child_probability(child_probs), 3),
+    0.65,
+)
+check(
+    "teen bracket excluded by default",
+    round(w.child_probability([0, 0, 0, 0.4, 0.6, 0, 0, 0]), 3),
+    0.0,
+)
+check(
+    "teen bracket can be included",
+    round(w.child_probability([0, 0, 0, 0.4, 0.6, 0, 0, 0], include_teen=True), 3),
+    0.4,
+)
+
+age_decider = w.ChildPresenceDecider(on=w.CHILD_PROB_ON, off=w.CHILD_PROB_OFF)
+adult_age = [age_decider.add_value(p) for p in (0.10, 0.15, 0.05, 0.20, 0.08, 0.12)]
+check("adult age probabilities never flag a child", any(adult_age), False)
+
+child_age_decider = w.ChildPresenceDecider(on=w.CHILD_PROB_ON, off=w.CHILD_PROB_OFF)
+child_age = [child_age_decider.add_value(p) for p in (0.62, 0.70, 0.58, 0.66)]
+check("high child probabilities flag a child", child_age[-1], True)
 
 total = len(RESULTS)
 passed = sum(RESULTS)

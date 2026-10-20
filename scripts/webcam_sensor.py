@@ -85,6 +85,20 @@ CHILD_RATIO_WINDOW = 5           # moving-median window over raw ratios
 CHILD_MIN_LANDMARK_VISIBILITY = 0.3
 CHILD_MAX_SHOULDER_TILT = 0.5    # reject clearly turned poses (dy > 50% of dx)
 
+# Real age classifier on face crops: GoogLeNet/Adience ONNX run through OpenCV DNN +
+# MediaPipe FaceDetector — no extra runtime dependency. Falls back to the pose ratio
+# above when no face is visible.
+AGE_MODEL_PATH = os.path.join(PROJECT_ROOT, 'models', 'age_googlenet.onnx')
+FACE_MODEL_PATH = os.path.join(PROJECT_ROOT, 'models', 'blaze_face_short_range.tflite')
+AGE_MEAN = (104, 117, 123)
+AGE_CLASSES = ['(0-2)', '(4-6)', '(8-12)', '(15-20)', '(25-32)', '(38-43)', '(48-53)', '(60-100)']
+CHILD_AGE_BRACKETS = (0, 1, 2)   # (0-2), (4-6), (8-12)
+CHILD_INCLUDE_TEEN = False       # set True to also protect the (15-20) bracket
+CHILD_PROB_ON = 0.55             # probability mass at which a child is considered present
+CHILD_PROB_OFF = 0.35            # ... and cleared again
+FACE_SCORE_THRESHOLD = 0.5
+MAX_AGE_FACES = 3                # classify at most this many faces per sample
+
 # MediaPipe Hand Landmarks Skeleton Connections
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),        # Thumb
@@ -224,10 +238,10 @@ class ChildPresenceDecider:
         self.pending = 0
         self.median = 0.0
 
-    def add_ratio(self, ratio):
-        """Feed the best ratio for this frame (0/None = no valid measurement)."""
-        if ratio:
-            self.ratios.append(ratio)
+    def add_value(self, value):
+        """Feed this frame's signal (None/0 = no valid measurement)."""
+        if value:
+            self.ratios.append(value)
 
         if self.ratios:
             ordered = sorted(self.ratios)
@@ -250,6 +264,123 @@ class ChildPresenceDecider:
                 self.pending = 0
 
         return self.present
+
+
+def softmax(logits):
+    """Numerically stable softmax over a 1-D sequence of logits."""
+    values = [float(v) for v in logits]
+    if not values:
+        return []
+    peak = max(values)
+    exps = [math.exp(v - peak) for v in values]
+    total = sum(exps) or 1.0
+    return [v / total for v in exps]
+
+
+def child_probability(probabilities, include_teen=CHILD_INCLUDE_TEEN):
+    """Probability mass for the child brackets (optionally including (15-20))."""
+    indexes = list(CHILD_AGE_BRACKETS) + ([3] if include_teen else [])
+    return float(sum(probabilities[i] for i in indexes if 0 <= i < len(probabilities)))
+
+
+class AgeEstimator:
+    """Age-bracket classifier on face crops, using only already-installed libraries.
+
+    MediaPipe's FaceDetector finds faces; the GoogLeNet/Adience ONNX age model runs
+    through OpenCV's DNN module. Crops are processed in memory only — nothing is
+    stored or transmitted. Returns the highest child probability across visible faces.
+    """
+
+    def __init__(self, age_model_path=AGE_MODEL_PATH, face_model_path=FACE_MODEL_PATH,
+                 score_threshold=FACE_SCORE_THRESHOLD):
+        self.available = False
+        self.detector = None
+        self.net = None
+        self.cv2 = None
+        self.mp = None
+        self.score_threshold = score_threshold
+        try:
+            if not (os.path.exists(age_model_path) and os.path.exists(face_model_path)):
+                print("[WARN] [AGE] Age/face model files not found; using pose fallback")
+                return
+            import cv2
+            import mediapipe as mp
+            from mediapipe.tasks.python import BaseOptions, vision
+
+            self.cv2 = cv2
+            self.mp = mp
+            self.net = cv2.dnn.readNetFromONNX(age_model_path)
+            options = vision.FaceDetectorOptions(
+                base_options=BaseOptions(model_asset_path=face_model_path),
+                running_mode=vision.RunningMode.IMAGE,
+                min_detection_confidence=0.5,
+            )
+            self.detector = vision.FaceDetector.create_from_options(options)
+            self.available = True
+            print("[OK] [AGE READY] GoogLeNet age classifier + BlazeFace detector")
+        except Exception as exc:
+            print(f"[WARN] [AGE] Age model unavailable: {exc}")
+
+    def _classify_crop(self, crop):
+        resized = self.cv2.resize(crop, (224, 224))
+        blob = self.cv2.dnn.blobFromImage(
+            resized, 1.0, (224, 224), AGE_MEAN, swapRB=False, crop=False
+        )
+        self.net.setInput(blob)
+        logits = self.net.forward().reshape(-1)[:len(AGE_CLASSES)]
+        probabilities = softmax(logits)
+        bracket = AGE_CLASSES[int(probabilities.index(max(probabilities)))]
+        return child_probability(probabilities), bracket
+
+    def estimate(self, frame_rgb, mp_image=None):
+        """Return (p_child, bracket) for the most child-like visible face."""
+        if not self.available:
+            return None, None
+        if mp_image is None:
+            mp_image = self.mp.Image(
+                image_format=self.mp.ImageFormat.SRGB, data=frame_rgb
+            )
+        try:
+            result = self.detector.detect(mp_image)
+        except Exception as exc:
+            print(f"[WARN] [AGE] Face detection failed: {exc}")
+            return None, None
+
+        detections = [
+            detection
+            for detection in (result.detections or [])
+            if detection.categories
+            and float(detection.categories[0].score) >= self.score_threshold
+        ]
+        if not detections:
+            return None, None
+        detections.sort(
+            key=lambda d: d.bounding_box.width * d.bounding_box.height, reverse=True
+        )
+
+        height, width = frame_rgb.shape[:2]
+        best_probability = None
+        best_bracket = None
+        for detection in detections[:MAX_AGE_FACES]:
+            box = detection.bounding_box
+            pad_x = int(box.width * 0.2)
+            pad_y = int(box.height * 0.2)
+            x1 = max(0, box.origin_x - pad_x)
+            y1 = max(0, box.origin_y - pad_y)
+            x2 = min(width, box.origin_x + box.width + pad_x)
+            y2 = min(height, box.origin_y + box.height + pad_y)
+            crop = frame_rgb[y1:y2, x1:x2]
+            if crop.size == 0:
+                continue
+            try:
+                probability, bracket = self._classify_crop(crop)
+            except Exception as exc:
+                print(f"[WARN] [AGE] Inference failed: {exc}")
+                continue
+            if best_probability is None or probability > best_probability:
+                best_probability = probability
+                best_bracket = bracket
+        return best_probability, best_bracket
 
 
 def count_visible_poses(result, min_visibility=0.2, min_visible_landmarks=4):
@@ -393,7 +524,11 @@ class WebcamSensor:
         self.child_present = False
         self.reported_child_present = False
         self.last_child_ratio = 0.0
-        self.child_decider = ChildPresenceDecider()
+        self.age_decider = ChildPresenceDecider(on=CHILD_PROB_ON, off=CHILD_PROB_OFF)
+        self.pose_decider = ChildPresenceDecider(on=CHILD_RATIO_ON, off=CHILD_RATIO_OFF)
+        self.last_age_bracket = None
+        self.last_child_probability = 0.0
+        self.last_child_source = 'none'
         self.last_reported_person_count = None
         self.room_event_log = deque(maxlen=20)
 
@@ -885,6 +1020,9 @@ class WebcamSensor:
                 print(f"[WARN] [PRESENCE] Could not start Pose Landmarker: {e}")
                 pose_landmarker = None
 
+        # Step 3c: Age classifier for child detection (face crops, local only)
+        age_estimator = AgeEstimator()
+
         # Step 4: Video capture pipeline
         width = 320
         height = 240
@@ -933,6 +1071,7 @@ class WebcamSensor:
         print(f"Min Confidence : {int(self.min_confidence * 100)}%")
         print(f"Supported ML   : Hand Raised | Thumbs Up | Closed Fist | Swipe")
         print(f"Room Presence  : {'Pose Landmarker · up to ' + str(PRESENCE_MAX_POSES) + ' people' if pose_landmarker is not None else 'DISABLED (pose model missing)'}")
+        print(f"Age Model      : {'GoogLeNet/Adience + BlazeFace (local face crops)' if age_estimator is not None and age_estimator.available else 'DISABLED -> pose fallback'}")
         print(f"Desktop Window : {'ENABLED (Native Popup on Desktop)' if preview_window else 'DISABLED (Headless)'}")
         print(f"Web Dashboard  : {self.server_url}/camera (Live video + landmarks)")
         print(f"Privacy Mode   : 100% Local Inference (Zero cloud/streaming)")
@@ -1089,28 +1228,35 @@ class WebcamSensor:
                         # Reuse the frame already prepared for gesture recognition
                         pose_result = pose_landmarker.detect(mp_image)
                         self.person_count = count_visible_poses(pose_result)
-                        child_count = 0
                         max_ratio = 0.0
                         for landmarks in (pose_result.pose_landmarks or []):
                             ratio = estimate_child_likelihood(landmarks)
                             if ratio is not None:
                                 max_ratio = max(max_ratio, ratio)
-                                if ratio >= CHILD_RATIO_ON:
-                                    child_count += 1
 
-                        # Smooth single-frame noise with a moving median before deciding:
-                        # head/shoulder ratio jumps around as a person moves or turns.
-                        self.child_present = self.child_decider.add_ratio(max_ratio)
-                        ratio_median = self.child_decider.median
+                        # Prefer the real age classifier on face crops; fall back to the
+                        # pose-proportion ratio when no face is visible.
+                        p_child, age_bracket = (None, None)
+                        if age_estimator is not None:
+                            p_child, age_bracket = age_estimator.estimate(frame_rgb, mp_image)
 
-                        self.child_count = child_count if self.child_present else 0
-                        self.last_child_ratio = ratio_median
+                        if p_child is not None:
+                            self.last_child_source = 'age'
+                            self.last_age_bracket = age_bracket
+                            self.last_child_probability = p_child
+                            self.child_present = self.age_decider.add_value(p_child)
+                            signal = f"age p={p_child:.2f} bracket={age_bracket}"
+                        else:
+                            self.last_child_source = 'pose'
+                            self.child_present = self.pose_decider.add_value(max_ratio)
+                            self.last_child_ratio = self.pose_decider.median
+                            signal = f"pose ratio={self.pose_decider.median:.2f}"
+
+                        self.child_count = 1 if self.child_present else 0
                         if self.child_present != self.reported_child_present:
                             print(
                                 f"[PRESENCE] Child present: "
-                                f"{'yes' if self.child_present else 'no'} "
-                                f"(median head/shoulder ratio={ratio_median:.2f}, "
-                                f"on>={CHILD_RATIO_ON:.2f}/off<={CHILD_RATIO_OFF:.2f})"
+                                f"{'yes' if self.child_present else 'no'} ({signal})"
                             )
                             self.reported_child_present = self.child_present
                         presence_event = self.presence.add_sample(self.person_count, now)
@@ -1155,7 +1301,12 @@ class WebcamSensor:
                     current_fps = fps_count / (now - fps_start)
                     hands_count = len(results.hand_landmarks) if results.hand_landmarks else 0
                     top_label = detected_category if (detected_category and detected_category != 'None') else 'None'
-                    print(f"[ML RUNNING] ~{current_fps:.1f} fps | Hands: {hands_count} | People: {self.person_count} | HeadRatio: {self.last_child_ratio:.2f} | Active: {top_label} ({detected_score*100:.0f}%)", end='\r', flush=True)
+                    child_info = (
+                        f"age p={self.last_child_probability:.2f} {self.last_age_bracket or ''}"
+                        if self.last_child_source == 'age'
+                        else f"pose r={self.last_child_ratio:.2f}"
+                    )
+                    print(f"[ML RUNNING] ~{current_fps:.1f} fps | Hands: {hands_count} | People: {self.person_count} | Child: {child_info} | Active: {top_label} ({detected_score*100:.0f}%)", end='\r', flush=True)
                     fps_count = 0
                     fps_start = now
 
