@@ -203,6 +203,44 @@ describe('Family Mode policy', () => {
     // The count alone arms via the "already present" rule, not as an entry event.
     expect(screen.getByTestId('family-protection-overlay')).toBeTruthy();
   });
+
+  it('shows the room stats panel when Family Mode is on', async () => {
+    const {screen} = await setup();
+
+    act(() => room!.setFamilyMode(true));
+
+    expect(screen.getByTestId('room-stats-panel')).toBeTruthy();
+    // The stale engine label is gone
+    expect(screen.queryByText('Vega Media Engine')).toBeNull();
+  });
+
+  it('dismisses the stats panel and restores it on the next Family Mode enable', async () => {
+    const {screen} = await setup();
+
+    act(() => room!.setFamilyMode(true));
+    fireEvent.press(screen.getByTestId('btn-room-stats-dismiss'));
+    expect(screen.queryByTestId('room-stats-panel')).toBeNull();
+
+    act(() => room!.setFamilyMode(false));
+    act(() => room!.setFamilyMode(true));
+    expect(screen.getByTestId('room-stats-panel')).toBeTruthy();
+  });
+
+  it('shows the live head-count and whether another person is present', async () => {
+    const {screen, ws} = await setup();
+
+    act(() => room!.setFamilyMode(true));
+    serverEvent(ws, {
+      type: 'person_entered',
+      source: 'webcam',
+      payload: {personCount: 2, previousCount: 1, delta: 1},
+      timestamp: Date.now(),
+    });
+
+    expect(screen.getByText('People in view')).toBeTruthy();
+    expect(screen.getByText('2')).toBeTruthy();
+    expect(screen.getByText('Yes')).toBeTruthy();
+  });
 });
 
 describe('home-screen Family Mode switch', () => {

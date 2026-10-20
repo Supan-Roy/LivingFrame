@@ -17,11 +17,9 @@ import {
   KeplerVideoSurfaceView,
 } from '@amazon-devices/react-native-w3cmedia';
 import {MediaItem} from '../types/catalog';
-import {RoomGestureType} from '../types/room';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
 import {findBlockingSegment} from '../room/scenePolicy';
-import {GestureReactionOverlay} from './GestureReactionOverlay';
 import {Icon} from './Icon';
 
 export interface VideoPlayerViewProps {
@@ -30,13 +28,6 @@ export interface VideoPlayerViewProps {
   onClose: () => void;
   onRoomRecap: (item: MediaItem) => void;
 }
-
-// Gestures that drive playback control (rather than the ambient recap card)
-const PLAYBACK_CONTROL_GESTURES: RoomGestureType[] = [
-  'hand_raised',
-  'swipe_left',
-  'swipe_right',
-];
 
 // Seconds skipped per horizontal swipe gesture
 const GESTURE_SEEK_STEP_SEC = 5;
@@ -62,6 +53,8 @@ export const VideoPlayerView = ({
   const [controlsVisible, setControlsVisible] = useState<boolean>(true);
   const [gestureFeedback, setGestureFeedback] = useState<string | null>(null);
   const [roomNotice, setRoomNotice] = useState<string | null>(null);
+  const [statsVisible, setStatsVisible] = useState<boolean>(false);
+  const [arrivalText, setArrivalText] = useState<string | null>(null);
 
   const playerRef = useRef<VideoPlayer | null>(null);
   const surfaceHandleRef = useRef<string | null>(null);
@@ -76,6 +69,7 @@ export const VideoPlayerView = ({
   const isLoadedRef = useRef<boolean>(false);
   const gestureFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roomNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const arrivalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const {roomState, setGesturesEnabled, setFamilyMode} = useRoom();
   const lastGestureEventIdRef = useRef<string | null>(roomState.lastEvent?.id ?? null);
 
@@ -308,6 +302,9 @@ export const VideoPlayerView = ({
       if (roomNoticeTimerRef.current) {
         clearTimeout(roomNoticeTimerRef.current);
       }
+      if (arrivalTimerRef.current) {
+        clearTimeout(arrivalTimerRef.current);
+      }
       try {
         player.pause();
         if (surfaceHandleRef.current) {
@@ -501,6 +498,15 @@ export const VideoPlayerView = ({
       setProtectionArmed(true);
       setProtectionOverride(false);
       showRoomNotice('Someone joined the room · Family Mode active');
+      setArrivalText('Person entered');
+      if (arrivalTimerRef.current) {
+        clearTimeout(arrivalTimerRef.current);
+      }
+      arrivalTimerRef.current = setTimeout(() => {
+        if (isMountedRef.current) {
+          setArrivalText(null);
+        }
+      }, 4000);
     } else if (event.type === 'person_left') {
       setProtectionArmed(false);
     }
@@ -511,6 +517,17 @@ export const VideoPlayerView = ({
     if (!roomState.familyModeEnabled) {
       setProtectionArmed(false);
       setProtectionOverride(false);
+    }
+  }, [roomState.familyModeEnabled]);
+
+  // Room stats panel: shown whenever Family Mode is switched on, hidden when off.
+  // Dismissing it stays dismissed until Family Mode is toggled on again.
+  useEffect(() => {
+    if (roomState.familyModeEnabled) {
+      setStatsVisible(true);
+    } else {
+      setStatsVisible(false);
+      setArrivalText(null);
     }
   }, [roomState.familyModeEnabled]);
 
@@ -718,18 +735,56 @@ export const VideoPlayerView = ({
         </View>
       )}
 
+      {/* Family Mode room stats — right edge, semi-transparent, dismissible */}
+      {statsVisible && roomState.familyModeEnabled && (
+        <View style={styles.roomStatsPanel} testID="room-stats-panel">
+          <View style={styles.roomStatsHeader}>
+            <Text style={styles.roomStatsTitle}>FAMILY MODE</Text>
+            <Pressable
+              style={styles.roomStatsDismiss}
+              onPress={() => setStatsVisible(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Hide room stats"
+              testID="btn-room-stats-dismiss">
+              <Icon name="close" size={11} color="#E2E8F0" />
+            </Pressable>
+          </View>
+
+          <View style={styles.roomStatsRow}>
+            <Text style={styles.roomStatsLabel}>People in view</Text>
+            <Text style={styles.roomStatsValue}>{roomState.viewersPresent}</Text>
+          </View>
+
+          <View style={styles.roomStatsRow}>
+            <Text style={styles.roomStatsLabel}>Another person</Text>
+            <Text
+              style={[
+                styles.roomStatsValue,
+                roomState.viewersPresent >= 2 && styles.roomStatsValueAlert,
+              ]}>
+              {roomState.viewersPresent >= 2 ? 'Yes' : 'No'}
+            </Text>
+          </View>
+
+          {arrivalText && (
+            <View style={styles.roomStatsArrival}>
+              <Icon name="person" size={11} color="#7DD3FC" />
+              <Text style={styles.roomStatsArrivalText}>{arrivalText}</Text>
+            </View>
+          )}
+
+          <Text style={styles.roomStatsFootnote}>
+            Presence count only · no identity
+          </Text>
+        </View>
+      )}
+
       {/* 4. Controls & HUD Overlays (disappear after 5s or on tap to view video full screen) */}
       {controlsVisible && (
         <>
           {/* Subtle Edge Vignettes for Navigation Legibility */}
           <View style={styles.topVignette} pointerEvents="none" />
           <View style={styles.bottomVignette} pointerEvents="none" />
-
-          {/* Live Room Awareness Gesture Reaction Overlay (control gestures handled separately) */}
-          <GestureReactionOverlay
-            hiddenGestures={PLAYBACK_CONTROL_GESTURES}
-            onOpenRecap={() => onRoomRecap(item)}
-          />
 
           {/* Top Navigation & Info HUD */}
           <View style={styles.topHeader}>
@@ -789,8 +844,6 @@ export const VideoPlayerView = ({
                       {isPlaying ? 'PLAYING 1080p' : 'PAUSED'}
                     </Text>
                   </View>
-                  <Text style={styles.metaDot}>•</Text>
-                  <Text style={styles.metaEngineText}>Vega Media Engine</Text>
                 </View>
               </View>
 
@@ -1101,6 +1154,77 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.4,
   },
+  roomStatsPanel: {
+    position: 'absolute',
+    right: 48,
+    top: '34%',
+    width: 264,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: 'rgba(3, 7, 18, 0.5)',
+    zIndex: 30,
+  },
+  roomStatsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  roomStatsTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.6,
+    color: '#FDE68A',
+  },
+  roomStatsDismiss: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  roomStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  roomStatsLabel: {
+    fontSize: 13,
+    color: 'rgba(226, 232, 240, 0.88)',
+  },
+  roomStatsValue: {
+    fontSize: 19,
+    fontWeight: '800',
+    color: '#F8FAFC',
+  },
+  roomStatsValueAlert: {
+    color: '#FDE68A',
+  },
+  roomStatsArrival: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  roomStatsArrivalText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#7DD3FC',
+  },
+  roomStatsFootnote: {
+    marginTop: 10,
+    fontSize: 10,
+    letterSpacing: 0.2,
+    color: 'rgba(148, 163, 184, 0.9)',
+  },
   protectionOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000000',
@@ -1248,12 +1372,6 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 14,
     fontWeight: '500',
-  },
-  metaEngineText: {
-    color: '#38BDF8',
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
   },
   streamBadge: {
     flexDirection: 'row',
