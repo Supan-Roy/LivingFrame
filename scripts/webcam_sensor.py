@@ -337,23 +337,27 @@ class AgeEstimator:
             print(f"[WARN] [AGE] Age model unavailable: {exc}")
 
     def _classify_crop(self, crop):
-        resized = self.cv2.resize(crop, (224, 224))
+        if not self.available or self.cv2 is None or self.net is None:
+            return 0.0, 'none'
+        cv2 = self.cv2
+        net = self.net
+        resized = cv2.resize(crop, (224, 224))
         if self.debug_crops and self.crop_index < 6:
             try:
-                self.cv2.imwrite(
+                cv2.imwrite(
                     f"/tmp/age_crop_{self.crop_index}.jpg",
-                    self.cv2.cvtColor(resized, self.cv2.COLOR_RGB2BGR),
+                    cv2.cvtColor(resized, cv2.COLOR_RGB2BGR),
                 )
                 self.crop_index += 1
             except Exception:
                 pass
-        blob = self.cv2.dnn.blobFromImage(
+        blob = cv2.dnn.blobFromImage(
             resized, 1.0, (224, 224), AGE_MEAN, swapRB=False, crop=False
         )
-        self.net.setInput(blob)
-        logits = self.net.forward().reshape(-1)[:len(AGE_CLASSES)]
+        net.setInput(blob)
+        logits = net.forward().reshape(-1)[:len(AGE_CLASSES)]
         probabilities = softmax(logits)
-        bracket = AGE_CLASSES[int(probabilities.index(max(probabilities)))]
+        bracket = AGE_CLASSES[probabilities.index(max(probabilities))]
         return child_probability(probabilities), bracket
 
     def _head_crop(self, frame_rgb, landmarks):
@@ -430,14 +434,16 @@ class AgeEstimator:
 
     def estimate(self, frame_rgb, mp_image=None):
         """Return (p_child, bracket) for the most child-like visible face."""
-        if not self.available:
+        if not self.available or self.mp is None or self.detector is None:
             return None, None
+        mp = self.mp
+        detector = self.detector
         if mp_image is None:
-            mp_image = self.mp.Image(
-                image_format=self.mp.ImageFormat.SRGB, data=frame_rgb
+            mp_image = mp.Image(
+                image_format=mp.ImageFormat.SRGB, data=frame_rgb
             )
         try:
-            result = self.detector.detect(mp_image)
+            result = detector.detect(mp_image)
         except Exception as exc:
             print(f"[WARN] [AGE] Face detection failed: {exc}")
             return None, None
