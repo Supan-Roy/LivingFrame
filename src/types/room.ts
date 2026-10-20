@@ -49,6 +49,8 @@ export interface RoomEvent {
     previousCount?: number;
     delta?: number;
     source?: string;
+    childCount?: number;
+    childPresent?: boolean;
   };
 }
 
@@ -69,4 +71,6 @@ export interface RoomState {
   gesturesEnabled: boolean;
   /** Viewer preference: when on, room changes can trigger family-safe playback. */
   familyModeEnabled: boolean;
+  /** Rough estimate from body proportions — not identity and not a certainty. */
+  childPresent: boolean;
 }

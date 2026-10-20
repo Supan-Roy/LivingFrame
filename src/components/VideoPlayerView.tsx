@@ -108,7 +108,6 @@ export const VideoPlayerView = ({
   const lastGestureEventIdRef = useRef<string | null>(roomState.lastEvent?.id ?? null);
 
   // --- Family Mode / room-aware protection state ---
-  const [protectionArmed, setProtectionArmed] = useState<boolean>(false);
   const [protectionOverride, setProtectionOverride] = useState<boolean>(false);
   const pausedByProtectionRef = useRef<boolean>(false);
   const lastRoomEventIdRef = useRef<string | null>(roomState.lastEvent?.id ?? null);
@@ -506,17 +505,19 @@ export const VideoPlayerView = ({
   }, []);
 
   // --- Family Mode / room-aware protection --------------------------------
+  // A child in the room (detected, or already present when Family Mode is switched on)
+  // is what arms the policy. `childPresent` is a body-proportion estimate, not identity.
   const safetySegments = item?.sceneSafety ?? [];
   const blockedSegment = findBlockingSegment({
     familyModeEnabled: roomState.familyModeEnabled,
-    armed: protectionArmed,
+    armed: roomState.childPresent,
     override: protectionOverride,
     segments: safetySegments,
     currentTimeSec,
   });
   const isProtectionBlocked = blockedSegment !== null;
 
-  // A person entering while Family Mode is on arms the policy; leaving disarms it.
+  // Contextual reaction to room entries (the policy itself follows child presence).
   // (The sensor already debounces entries, so this is not a per-frame reaction.)
   useEffect(() => {
     const event = roomState.lastEvent;
@@ -526,12 +527,10 @@ export const VideoPlayerView = ({
     lastRoomEventIdRef.current = event.id;
 
     if (event.type === 'person_entered') {
-      if (!roomState.familyModeEnabled) {
-        return;
+      // The policy itself is driven by child presence (below); this is the reaction.
+      if (roomState.familyModeEnabled) {
+        showRoomNotice('Someone joined the room · Family Mode active');
       }
-      setProtectionArmed(true);
-      setProtectionOverride(false);
-      showRoomNotice('Someone joined the room · Family Mode active');
       setArrivalText('Person entered');
       if (arrivalTimerRef.current) {
         clearTimeout(arrivalTimerRef.current);
@@ -541,15 +540,12 @@ export const VideoPlayerView = ({
           setArrivalText(null);
         }
       }, 4000);
-    } else if (event.type === 'person_left') {
-      setProtectionArmed(false);
     }
   }, [roomState.lastEvent, roomState.familyModeEnabled, showRoomNotice]);
 
-  // Turning Family Mode off clears any active policy.
+  // Turning Family Mode off clears any viewer override.
   useEffect(() => {
     if (!roomState.familyModeEnabled) {
-      setProtectionArmed(false);
       setProtectionOverride(false);
     }
   }, [roomState.familyModeEnabled]);
@@ -564,15 +560,6 @@ export const VideoPlayerView = ({
       setArrivalText(null);
     }
   }, [roomState.familyModeEnabled]);
-
-  // If Family Mode is enabled while someone is already in the room (no "entered" event
-  // will fire for them), arm the policy straight away — e.g. a child was already there
-  // before the title started. We only know the head-count, never identity.
-  useEffect(() => {
-    if (roomState.familyModeEnabled && roomState.viewersPresent >= 2) {
-      setProtectionArmed(true);
-    }
-  }, [roomState.familyModeEnabled, roomState.viewersPresent]);
 
   // Handle the playhead being inside a tagged segment: skip it, or pause with a reason.
   useEffect(() => {
@@ -806,7 +793,9 @@ export const VideoPlayerView = ({
 
           <View style={styles.roomStatsRow}>
             <Text style={styles.roomStatsLabel}>People in view</Text>
-            <Text style={styles.roomStatsValue}>{roomState.viewersPresent}</Text>
+            <Text style={styles.roomStatsValue} testID="room-stats-people">
+              {roomState.viewersPresent}
+            </Text>
           </View>
 
           <View style={styles.roomStatsRow}>
@@ -815,8 +804,21 @@ export const VideoPlayerView = ({
               style={[
                 styles.roomStatsValue,
                 roomState.viewersPresent >= 2 && styles.roomStatsValueAlert,
-              ]}>
+              ]}
+              testID="room-stats-another">
               {roomState.viewersPresent >= 2 ? 'Yes' : 'No'}
+            </Text>
+          </View>
+
+          <View style={styles.roomStatsRow}>
+            <Text style={styles.roomStatsLabel}>Child present (est.)</Text>
+            <Text
+              style={[
+                styles.roomStatsValue,
+                roomState.childPresent && styles.roomStatsValueAlert,
+              ]}
+              testID="room-stats-child">
+              {roomState.childPresent ? 'Yes' : 'No'}
             </Text>
           </View>
 
@@ -828,7 +830,7 @@ export const VideoPlayerView = ({
           )}
 
           <Text style={styles.roomStatsFootnote}>
-            Presence count only · no identity
+            Presence + child estimate · no identity
           </Text>
         </View>
       )}

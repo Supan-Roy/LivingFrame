@@ -45,6 +45,7 @@ if os.path.exists(VENV_PYTHON) and sys.executable != VENV_PYTHON:
         os.execv(VENV_PYTHON, [VENV_PYTHON] + sys.argv)
 
 import time
+import math
 import signal
 import argparse
 import subprocess
@@ -71,6 +72,18 @@ PRESENCE_MAX_POSES = 3           # up to this many visible people are counted
 PRESENCE_WINDOW = 5              # rolling window of raw counts used for stabilisation
 PRESENCE_CONFIRM_SAMPLES = 3     # sustained samples required to confirm a change
 PRESENCE_COOLDOWN_SEC = 3.0      # minimum gap between person_entered/person_left events
+
+# Child heuristic: children have a proportionally larger head relative to shoulder width.
+# Measured from pose landmarks only (ear-to-ear / shoulder-to-shoulder) — no face image,
+# no identity, no age model. It is an estimate and can be wrong, so the family policy
+# treats a positive result conservatively (pause rather than assume an adult).
+# Hysteresis + sustained agreement keep it from flickering on an adult's normal variance.
+CHILD_RATIO_ON = 0.50            # median ratio at which a child is considered present
+CHILD_RATIO_OFF = 0.42           # median ratio below which that is cleared again
+CHILD_CONFIRM_SAMPLES = 3        # consecutive pose samples needed to change state
+CHILD_RATIO_WINDOW = 5           # moving-median window over raw ratios
+CHILD_MIN_LANDMARK_VISIBILITY = 0.3
+CHILD_MAX_SHOULDER_TILT = 0.5    # reject clearly turned poses (dy > 50% of dx)
 
 # MediaPipe Hand Landmarks Skeleton Connections
 HAND_CONNECTIONS = [
@@ -193,6 +206,52 @@ class PresenceStabilizer:
         return event_type, stable, previous
 
 
+class ChildPresenceDecider:
+    """Median-smoothed, hysteresis-based decision for "a child is in view".
+
+    Pure logic (no MediaPipe dependency) so it can be tested directly. The raw
+    head/shoulder ratio is noisy frame to frame, so we threshold the moving median and
+    require `confirm` consecutive decisions before flipping state.
+    """
+
+    def __init__(self, on=CHILD_RATIO_ON, off=CHILD_RATIO_OFF,
+                 confirm=CHILD_CONFIRM_SAMPLES, window=CHILD_RATIO_WINDOW):
+        self.on = on
+        self.off = off
+        self.confirm = confirm
+        self.ratios = deque(maxlen=window)
+        self.present = False
+        self.pending = 0
+        self.median = 0.0
+
+    def add_ratio(self, ratio):
+        """Feed the best ratio for this frame (0/None = no valid measurement)."""
+        if ratio:
+            self.ratios.append(ratio)
+
+        if self.ratios:
+            ordered = sorted(self.ratios)
+            self.median = ordered[len(ordered) // 2]
+        else:
+            self.median = 0.0
+
+        target = None
+        if self.median >= self.on:
+            target = True
+        elif self.median <= self.off:
+            target = False
+
+        if target is None or target == self.present:
+            self.pending = 0
+        else:
+            self.pending += 1
+            if self.pending >= self.confirm:
+                self.present = target
+                self.pending = 0
+
+        return self.present
+
+
 def count_visible_poses(result, min_visibility=0.2, min_visible_landmarks=4):
     """Count poses that really have enough visible landmarks.
 
@@ -211,6 +270,43 @@ def count_visible_poses(result, min_visibility=0.2, min_visible_landmarks=4):
         if visible >= min_visible_landmarks:
             count += 1
     return count
+
+
+def estimate_child_likelihood(landmarks, min_visibility=CHILD_MIN_LANDMARK_VISIBILITY):
+    """Head-to-shoulder ratio for one pose, or None when it cannot be measured.
+
+    Children have a proportionally larger head than adults, so a higher ratio is a
+    (rough) child signal. Uses only pose landmarks: no face image is inspected, nobody
+    is identified, and no age model is run. Treat the result as an estimate.
+    """
+    def visibility(landmark):
+        value = getattr(landmark, 'visibility', 1.0)
+        return 1.0 if value is None else value
+
+    try:
+        left_ear, right_ear = landmarks[7], landmarks[8]
+        left_shoulder, right_shoulder = landmarks[11], landmarks[12]
+    except (IndexError, TypeError):
+        return None
+
+    if min(
+        visibility(left_ear),
+        visibility(right_ear),
+        visibility(left_shoulder),
+        visibility(right_shoulder),
+    ) < min_visibility:
+        return None
+
+    head_width = math.hypot(left_ear.x - right_ear.x, left_ear.y - right_ear.y)
+    shoulder_dx = abs(left_shoulder.x - right_shoulder.x)
+    shoulder_dy = abs(left_shoulder.y - right_shoulder.y)
+    if shoulder_dx <= 0 or shoulder_dy > CHILD_MAX_SHOULDER_TILT * shoulder_dx:
+        # Turned or angled shoulders make the ratio meaningless
+        return None
+    shoulder_width = math.hypot(shoulder_dx, shoulder_dy)
+    if shoulder_width <= 0:
+        return None
+    return head_width / shoulder_width
 
 
 class FrameUploader(threading.Thread):
@@ -293,6 +389,11 @@ class WebcamSensor:
         # Room presence (visible person count) state
         self.presence = PresenceStabilizer()
         self.person_count = 0
+        self.child_count = 0
+        self.child_present = False
+        self.reported_child_present = False
+        self.last_child_ratio = 0.0
+        self.child_decider = ChildPresenceDecider()
         self.last_reported_person_count = None
         self.room_event_log = deque(maxlen=20)
 
@@ -367,6 +468,8 @@ class WebcamSensor:
                 'count': count,
                 'previousCount': previous,
                 'delta': count - previous,
+                'childCount': self.child_count,
+                'childPresent': self.child_present,
             },
             'timestamp': int(time.time() * 1000),
         }
@@ -397,7 +500,12 @@ class WebcamSensor:
             'type': 'room_state',
             'source': source,
             'message': f'{count} in view',
-            'payload': {'personCount': count, 'count': count},
+            'payload': {
+                'personCount': count,
+                'count': count,
+                'childCount': self.child_count,
+                'childPresent': self.child_present,
+            },
             'timestamp': int(time.time() * 1000),
         }
         try:
@@ -981,6 +1089,30 @@ class WebcamSensor:
                         # Reuse the frame already prepared for gesture recognition
                         pose_result = pose_landmarker.detect(mp_image)
                         self.person_count = count_visible_poses(pose_result)
+                        child_count = 0
+                        max_ratio = 0.0
+                        for landmarks in (pose_result.pose_landmarks or []):
+                            ratio = estimate_child_likelihood(landmarks)
+                            if ratio is not None:
+                                max_ratio = max(max_ratio, ratio)
+                                if ratio >= CHILD_RATIO_ON:
+                                    child_count += 1
+
+                        # Smooth single-frame noise with a moving median before deciding:
+                        # head/shoulder ratio jumps around as a person moves or turns.
+                        self.child_present = self.child_decider.add_ratio(max_ratio)
+                        ratio_median = self.child_decider.median
+
+                        self.child_count = child_count if self.child_present else 0
+                        self.last_child_ratio = ratio_median
+                        if self.child_present != self.reported_child_present:
+                            print(
+                                f"[PRESENCE] Child present: "
+                                f"{'yes' if self.child_present else 'no'} "
+                                f"(median head/shoulder ratio={ratio_median:.2f}, "
+                                f"on>={CHILD_RATIO_ON:.2f}/off<={CHILD_RATIO_OFF:.2f})"
+                            )
+                            self.reported_child_present = self.child_present
                         presence_event = self.presence.add_sample(self.person_count, now)
                         stable_count = self.presence.stable_count()
                         if presence_event:
@@ -1023,7 +1155,7 @@ class WebcamSensor:
                     current_fps = fps_count / (now - fps_start)
                     hands_count = len(results.hand_landmarks) if results.hand_landmarks else 0
                     top_label = detected_category if (detected_category and detected_category != 'None') else 'None'
-                    print(f"[ML RUNNING] ~{current_fps:.1f} fps | Hands: {hands_count} | People: {self.person_count} | Active: {top_label} ({detected_score*100:.0f}%)", end='\r', flush=True)
+                    print(f"[ML RUNNING] ~{current_fps:.1f} fps | Hands: {hands_count} | People: {self.person_count} | HeadRatio: {self.last_child_ratio:.2f} | Active: {top_label} ({detected_score*100:.0f}%)", end='\r', flush=True)
                     fps_count = 0
                     fps_start = now
 

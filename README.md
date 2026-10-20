@@ -253,13 +253,16 @@ curl -L -o models/pose_landmarker_full.task \
 If it is missing, gesture control still works and presence detection is simply disabled.
 
 **Family Mode.** Enable it from the **home-screen top bar** or the **player header** — both
-switches control the same preference. When Family Mode is on and a new person enters, the
-room policy arms. If the playhead is inside a scene tagged in the asset's authored metadata,
-playback **pauses**, the picture is covered, and a warning explains why. Playback resumes
-automatically when the room clears, or via *Resume anyway*. If people are **already in view**
-when you enable it (for example a child was already in the room), the policy arms
-immediately — no new entry event is required. With Family Mode off, playback is completely
-unaffected.
+switches control the same preference. While Family Mode is on, the sensor estimates whether a
+**child** is in view from body proportions (head width vs shoulder width). If a child enters —
+or was already present — playback of a scene tagged in the asset's metadata **pauses**, the
+picture is covered, and a warning explains why. Playback resumes when the child is no longer
+detected, or via *Resume anyway*. With Family Mode off, playback is completely unaffected.
+
+> The child signal is an **estimate from pose landmarks**, not identity and not a certainty.
+> No face images, recognition, or age model are used. It can misfire — e.g. someone turned
+> sideways, or a short adult — and Family Mode deliberately errs toward pausing rather than
+> assuming an adult. The stats panel shows `Child present (est.)` so this is visible.
 
 **Two switches, one camera.** Gesture control and Family Mode are independent preferences
 that share the webcam sensor: it runs while **either** is on, and each switch only gates its

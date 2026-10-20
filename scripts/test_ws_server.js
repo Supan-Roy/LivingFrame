@@ -654,6 +654,7 @@ const server = http.createServer((req, res) => {
       const rawCount = parseInt(parsedUrl.searchParams.get('count'), 10);
       const currentCount = Number.isFinite(rawCount) ? rawCount : (entered ? 2 : 1);
       const previousCount = entered ? Math.max(0, currentCount - 1) : currentCount + 1;
+      const childPresent = parsedUrl.searchParams.get('child') === '1';
       const manualPayload = {
         type: entered ? 'person_entered' : 'person_left',
         source: 'manual',
@@ -665,6 +666,8 @@ const server = http.createServer((req, res) => {
           count: currentCount,
           previousCount,
           delta: currentCount - previousCount,
+          childCount: childPresent ? 1 : 0,
+          childPresent,
         },
         timestamp: Date.now(),
       };

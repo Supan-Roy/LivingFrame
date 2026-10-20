@@ -38,6 +38,7 @@ const defaultRoomState: RoomState = {
   visionEnabled: false,
   gesturesEnabled: false,
   familyModeEnabled: false,
+  childPresent: false,
 };
 
 const RoomContext = createContext<RoomContextValue>({
@@ -235,11 +236,15 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
             console.log(
               `[LivingFrame WS] ROOM EVENT: ${parsed.type} (${count} in view, source=${
                 parsed.source || 'webcam'
-              })`,
+              }${parsed.payload?.childPresent ? ', child detected' : ''})`,
             );
             setRoomState((prev) => ({
               ...prev,
               viewersPresent: typeof count === 'number' ? count : prev.viewersPresent,
+              childPresent:
+                typeof parsed.payload?.childPresent === 'boolean'
+                  ? parsed.payload.childPresent
+                  : prev.childPresent,
               lastEvent: {
                 id: `evt-${Date.now()}-${++eventSeqRef.current}`,
                 type: parsed.type,
@@ -255,9 +260,14 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
             // Current head-count only — deliberately does not set lastEvent, so it can
             // never be mistaken for an entry/leave and trigger the Family Mode policy.
             const count = parsed.payload?.personCount ?? parsed.payload?.count;
-            if (typeof count === 'number') {
-              setRoomState((prev) => ({...prev, viewersPresent: count}));
-            }
+            setRoomState((prev) => ({
+              ...prev,
+              viewersPresent: typeof count === 'number' ? count : prev.viewersPresent,
+              childPresent:
+                typeof parsed.payload?.childPresent === 'boolean'
+                  ? parsed.payload.childPresent
+                  : prev.childPresent,
+            }));
           } else if (parsed.type === 'vision_status') {
             console.log(`[LivingFrame WS] VISION STATUS: enabled=${!!parsed.enabled}`);
             setRoomState((prev) => ({

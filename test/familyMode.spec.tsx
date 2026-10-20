@@ -137,14 +137,20 @@ describe('Family Mode policy', () => {
       ws.onmessage?.({data: JSON.stringify(payload)});
     });
 
-  it('arms when Family Mode is enabled while someone is already present', async () => {
+  it('blocks when Family Mode is enabled while a child is already present', async () => {
     const {screen, ws} = await setup();
 
-    // Someone is already in the room (head-count only, no identity)
+    // A child is already in the room before Family Mode is switched on
     serverEvent(ws, {
       type: 'person_entered',
       source: 'webcam',
-      payload: {personCount: 2, previousCount: 1, delta: 1},
+      payload: {
+        personCount: 2,
+        previousCount: 1,
+        delta: 1,
+        childCount: 1,
+        childPresent: true,
+      },
       timestamp: Date.now(),
     });
 
@@ -161,21 +167,53 @@ describe('Family Mode policy', () => {
     serverEvent(ws, {
       type: 'person_entered',
       source: 'webcam',
-      payload: {personCount: 2, previousCount: 1, delta: 1},
+      payload: {
+        personCount: 2,
+        previousCount: 1,
+        delta: 1,
+        childCount: 1,
+        childPresent: true,
+      },
       timestamp: Date.now(),
     });
 
     expect(screen.queryByTestId('family-protection-overlay')).toBeNull();
   });
 
-  it('blocks when someone enters while Family Mode is on, and unblocks when they leave', async () => {
+  it('does not block for an adult-only entry', async () => {
     const {screen, ws} = await setup();
 
     act(() => room!.setFamilyMode(true));
     serverEvent(ws, {
       type: 'person_entered',
       source: 'webcam',
-      payload: {personCount: 2, previousCount: 1, delta: 1},
+      payload: {
+        personCount: 2,
+        previousCount: 1,
+        delta: 1,
+        childCount: 0,
+        childPresent: false,
+      },
+      timestamp: Date.now(),
+    });
+
+    expect(screen.queryByTestId('family-protection-overlay')).toBeNull();
+  });
+
+  it('blocks when a child enters while Family Mode is on, and unblocks when they leave', async () => {
+    const {screen, ws} = await setup();
+
+    act(() => room!.setFamilyMode(true));
+    serverEvent(ws, {
+      type: 'person_entered',
+      source: 'webcam',
+      payload: {
+        personCount: 2,
+        previousCount: 1,
+        delta: 1,
+        childCount: 1,
+        childPresent: true,
+      },
       timestamp: Date.now(),
     });
     expect(screen.getByTestId('family-protection-overlay')).toBeTruthy();
@@ -183,24 +221,29 @@ describe('Family Mode policy', () => {
     serverEvent(ws, {
       type: 'person_left',
       source: 'webcam',
-      payload: {personCount: 1, previousCount: 2, delta: -1},
+      payload: {
+        personCount: 1,
+        previousCount: 2,
+        delta: -1,
+        childCount: 0,
+        childPresent: false,
+      },
       timestamp: Date.now(),
     });
     expect(screen.queryByTestId('family-protection-overlay')).toBeNull();
   });
 
-  it('ignores a "room_state" head-count for arming (not an entry)', async () => {
+  it('a room_state carrying child presence blocks the tagged content', async () => {
     const {screen, ws} = await setup();
 
     act(() => room!.setFamilyMode(true));
     serverEvent(ws, {
       type: 'room_state',
       source: 'webcam',
-      payload: {personCount: 2},
+      payload: {personCount: 2, childCount: 1, childPresent: true},
       timestamp: Date.now(),
     });
 
-    // The count alone arms via the "already present" rule, not as an entry event.
     expect(screen.getByTestId('family-protection-overlay')).toBeTruthy();
   });
 
@@ -233,13 +276,20 @@ describe('Family Mode policy', () => {
     serverEvent(ws, {
       type: 'person_entered',
       source: 'webcam',
-      payload: {personCount: 2, previousCount: 1, delta: 1},
+      payload: {
+        personCount: 2,
+        previousCount: 1,
+        delta: 1,
+        childCount: 1,
+        childPresent: true,
+      },
       timestamp: Date.now(),
     });
 
     expect(screen.getByText('People in view')).toBeTruthy();
-    expect(screen.getByText('2')).toBeTruthy();
-    expect(screen.getByText('Yes')).toBeTruthy();
+    expect(screen.getByTestId('room-stats-people').props.children).toBe(2);
+    expect(screen.getByTestId('room-stats-another').props.children).toBe('Yes');
+    expect(screen.getByTestId('room-stats-child').props.children).toBe('Yes');
   });
 });
 
