@@ -5,7 +5,7 @@ import {useRoom} from '../context/RoomContext';
 import {HEADER_TOGGLE_ID} from '../navigation/focusGrid';
 
 export const Header = () => {
-  const {roomState, setGesturesEnabled} = useRoom();
+  const {roomState, setGesturesEnabled, setFamilyMode} = useRoom();
 
   return (
     <View style={styles.headerContainer}>
@@ -22,29 +22,54 @@ export const Header = () => {
         </View>
       </View>
 
-      {/* Universal gesture-control switch (remote/touch only — never gesture-activated) */}
-      <Pressable
-        style={[
-          styles.gestureToggle,
-          roomState.gesturesEnabled && styles.gestureToggleOn,
-        ]}
-        onPress={() => setGesturesEnabled(!roomState.gesturesEnabled)}
-        accessibilityRole="button"
-        accessibilityLabel={
-          roomState.gesturesEnabled
-            ? 'Turn off gesture control'
-            : 'Turn on gesture control'
-        }
-        testID={HEADER_TOGGLE_ID}>
-        <Text style={styles.gestureToggleIcon}>🎥</Text>
-        <Text
+      {/* Universal switches (remote/touch only — never gesture-activated) */}
+      <View style={styles.switchRow}>
+        <Pressable
           style={[
-            styles.gestureToggleText,
-            roomState.gesturesEnabled && styles.gestureToggleTextOn,
-          ]}>
-          {roomState.gesturesEnabled ? 'GESTURES ON' : 'GESTURES OFF'}
-        </Text>
-      </Pressable>
+            styles.gestureToggle,
+            roomState.gesturesEnabled && styles.gestureToggleOn,
+          ]}
+          onPress={() => setGesturesEnabled(!roomState.gesturesEnabled)}
+          accessibilityRole="button"
+          accessibilityLabel={
+            roomState.gesturesEnabled
+              ? 'Turn off gesture control'
+              : 'Turn on gesture control'
+          }
+          testID={HEADER_TOGGLE_ID}>
+          <Text style={styles.gestureToggleIcon}>🎥</Text>
+          <Text
+            style={[
+              styles.gestureToggleText,
+              roomState.gesturesEnabled && styles.gestureToggleTextOn,
+            ]}>
+            {roomState.gesturesEnabled ? 'GESTURES ON' : 'GESTURES OFF'}
+          </Text>
+        </Pressable>
+
+        <Pressable
+          style={[
+            styles.gestureToggle,
+            roomState.familyModeEnabled && styles.familyToggleOn,
+          ]}
+          onPress={() => setFamilyMode(!roomState.familyModeEnabled)}
+          accessibilityRole="button"
+          accessibilityLabel={
+            roomState.familyModeEnabled
+              ? 'Turn off Family Mode'
+              : 'Turn on Family Mode'
+          }
+          testID="header-family-toggle">
+          <Text style={styles.gestureToggleIcon}>👨‍👩‍👧</Text>
+          <Text
+            style={[
+              styles.gestureToggleText,
+              roomState.familyModeEnabled && styles.familyToggleTextOn,
+            ]}>
+            {roomState.familyModeEnabled ? 'FAMILY ON' : 'FAMILY OFF'}
+          </Text>
+        </Pressable>
+      </View>
     </View>
   );
 };
@@ -98,6 +123,11 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: -2,
   },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   gestureToggle: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -124,5 +154,12 @@ const styles = StyleSheet.create({
   },
   gestureToggleTextOn: {
     color: '#6EE7B7',
+  },
+  familyToggleOn: {
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    borderColor: 'rgba(245, 158, 11, 0.6)',
+  },
+  familyToggleTextOn: {
+    color: '#FDE68A',
   },
 });

@@ -33,6 +33,7 @@ export interface RoomEvent {
     | 'viewer_left'
     | 'person_entered'
     | 'person_left'
+    | 'room_state'
     | 'gesture_detected'
     | 'recap_requested'
     | 'connectivity_test'

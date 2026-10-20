@@ -252,11 +252,14 @@ curl -L -o models/pose_landmarker_lite.task \
 
 If it is missing, gesture control still works and presence detection is simply disabled.
 
-**Family Mode.** In the player header, toggle **👨‍👩‍👧 FAMILY ON**. When Family Mode is on
-and a new person enters, the room policy arms. If the playhead is inside a scene tagged in
-the asset's authored metadata, playback **pauses**, the picture is covered, and a warning
-explains why. Playback resumes automatically when the room clears, or via *Resume anyway*.
-With Family Mode off, playback is completely unaffected.
+**Family Mode.** Enable it from the **home-screen top bar** or the **player header** — both
+switches control the same preference. When Family Mode is on and a new person enters, the
+room policy arms. If the playhead is inside a scene tagged in the asset's authored metadata,
+playback **pauses**, the picture is covered, and a warning explains why. Playback resumes
+automatically when the room clears, or via *Resume anyway*. If people are **already in view**
+when you enable it (for example a child was already in the room), the policy arms
+immediately — no new entry event is required. With Family Mode off, playback is completely
+unaffected.
 
 **Two switches, one camera.** Gesture control and Family Mode are independent preferences
 that share the webcam sensor: it runs while **either** is on, and each switch only gates its

@@ -513,6 +513,15 @@ export const VideoPlayerView = ({
     }
   }, [roomState.familyModeEnabled]);
 
+  // If Family Mode is enabled while someone is already in the room (no "entered" event
+  // will fire for them), arm the policy straight away — e.g. a child was already there
+  // before the title started. We only know the head-count, never identity.
+  useEffect(() => {
+    if (roomState.familyModeEnabled && roomState.viewersPresent >= 2) {
+      setProtectionArmed(true);
+    }
+  }, [roomState.familyModeEnabled, roomState.viewersPresent]);
+
   // Handle the playhead being inside a tagged segment: skip it, or pause with a reason.
   useEffect(() => {
     if (!isProtectionBlocked || !blockedSegment) {

@@ -27,7 +27,7 @@ interface RoomContextValue {
 const defaultRoomState: RoomState = {
   sensorStatus: 'connecting',
   sensorDeviceName: 'Laptop Sensor Hub',
-  viewersPresent: 2,
+  viewersPresent: 0,
   isRecapAvailable: true,
   ambientMode: 'standard',
   connectedUrl: null,
@@ -251,6 +251,13 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
                 },
               },
             }));
+          } else if (parsed.type === 'room_state') {
+            // Current head-count only — deliberately does not set lastEvent, so it can
+            // never be mistaken for an entry/leave and trigger the Family Mode policy.
+            const count = parsed.payload?.personCount ?? parsed.payload?.count;
+            if (typeof count === 'number') {
+              setRoomState((prev) => ({...prev, viewersPresent: count}));
+            }
           } else if (parsed.type === 'vision_status') {
             console.log(`[LivingFrame WS] VISION STATUS: enabled=${!!parsed.enabled}`);
             setRoomState((prev) => ({

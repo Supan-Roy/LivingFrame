@@ -290,6 +290,7 @@ class WebcamSensor:
         # Room presence (visible person count) state
         self.presence = PresenceStabilizer()
         self.person_count = 0
+        self.last_reported_person_count = None
         self.room_event_log = deque(maxlen=20)
 
         # Heuristic parameters (for fallback mode)
@@ -382,6 +383,33 @@ class WebcamSensor:
             return True
         except Exception as e:
             print(f"⚠️ [ROOM EVENT FAILED] {e}")
+            return False
+
+    def send_person_count(self, count, source='webcam'):
+        """Report the current confirmed person count without implying an entry/leave.
+
+        Lets the app know who is *already* in the room (e.g. when Family Mode is enabled
+        after someone has been present the whole time).
+        """
+        payload = {
+            'type': 'room_state',
+            'source': source,
+            'message': f'{count} in view',
+            'payload': {'personCount': count, 'count': count},
+            'timestamp': int(time.time() * 1000),
+        }
+        try:
+            req = urllib.request.Request(
+                f"{self.server_url}/trigger",
+                data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            urllib.request.urlopen(req, timeout=2.0).read()
+            print(f"👥 [ROOM STATE] {count} in view")
+            return True
+        except Exception as e:
+            print(f"⚠️ [ROOM STATE FAILED] {e}")
             return False
 
     def _detect_swipe(self, results, now):
@@ -955,6 +983,15 @@ class WebcamSensor:
                         if presence_event:
                             event_type, count, previous = presence_event
                             self.send_room_event(event_type, count, previous)
+                            self.last_reported_person_count = count
+                        elif (
+                            self.presence.confirmed is not None
+                            and self.presence.confirmed != self.last_reported_person_count
+                        ):
+                            # Baseline just established (or changed silently): tell the app
+                            # the current count so it knows who is already in the room.
+                            self.send_person_count(self.presence.confirmed)
+                            self.last_reported_person_count = self.presence.confirmed
                         if len(results.hand_landmarks or []) == 0:
                             # Draw the count on the preview only when no hand label is shown
                             cv2.putText(annotated_rgb, f"People: {self.person_count}",
