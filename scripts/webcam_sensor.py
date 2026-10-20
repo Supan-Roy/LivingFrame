@@ -85,8 +85,8 @@ PRESENCE_COOLDOWN_SEC = 3.0      # minimum gap between person_entered/person_lef
 # no identity, no age model. It is an estimate and can be wrong, so the family policy
 # treats a positive result conservatively (pause rather than assume an adult).
 # Hysteresis + sustained agreement keep it from flickering on an adult's normal variance.
-CHILD_RATIO_ON = 0.50            # median ratio at which a child is considered present
-CHILD_RATIO_OFF = 0.42           # median ratio below which that is cleared again
+CHILD_RATIO_ON = 0.58            # median ratio at which a child is considered present (fallback mode)
+CHILD_RATIO_OFF = 0.45           # median ratio below which that is cleared again
 CHILD_CONFIRM_SAMPLES = 3        # consecutive pose samples needed to change state
 CHILD_RATIO_WINDOW = 5           # moving-median window over raw ratios
 CHILD_MIN_LANDMARK_VISIBILITY = 0.3
@@ -104,7 +104,7 @@ AGE_CLASSES = ['(0-2)', '(4-6)', '(8-12)', '(15-20)', '(25-32)', '(38-43)', '(48
 CHILD_AGE_BRACKETS = (0, 1, 2)   # (0-2), (4-6), (8-12)
 CHILD_INCLUDE_TEEN = False       # set True to also protect the (15-20) bracket
 CHILD_PROB_ON = 0.40             # probability mass at which a child is considered present
-CHILD_PROB_OFF = 0.32            # ... and cleared again
+CHILD_PROB_OFF = 0.20            # ... and cleared again (when child drops below 0.20)
 FACE_SCORE_THRESHOLD = 0.3       # full-range detector; lower gate catches small faces
 FACE_MIN_SUPPRESSION = 0.3
 MAX_AGE_FACES = 3                # classify at most this many faces per sample
@@ -248,9 +248,15 @@ class ChildPresenceDecider:
         self.pending = 0
         self.median = 0.0
 
+    def reset(self):
+        self.ratios.clear()
+        self.present = False
+        self.pending = 0
+        self.median = 0.0
+
     def add_value(self, value):
-        """Feed this frame's signal (None/0 = no valid measurement)."""
-        if value:
+        """Feed this frame's signal (None = no valid measurement; 0.0 is valid adult reading)."""
+        if value is not None:
             self.ratios.append(value)
 
         if self.ratios:
@@ -336,7 +342,7 @@ class AgeEstimator:
         except Exception as exc:
             print(f"[WARN] [AGE] Age model unavailable: {exc}")
 
-    def _classify_crop(self, crop):
+    def _classify_crop(self, crop, is_close_up=False):
         if not self.available or self.cv2 is None or self.net is None:
             return 0.0, 'none'
         cv2 = self.cv2
@@ -352,15 +358,29 @@ class AgeEstimator:
             except Exception:
                 pass
         blob = cv2.dnn.blobFromImage(
-            resized, 1.0, (224, 224), AGE_MEAN, swapRB=False, crop=False
+            resized, 1.0, (224, 224), AGE_MEAN, swapRB=True, crop=False
         )
         net.setInput(blob)
         logits = net.forward().reshape(-1)[:len(AGE_CLASSES)]
         probabilities = softmax(logits)
         bracket = AGE_CLASSES[probabilities.index(max(probabilities))]
-        p_child = child_probability(probabilities)
-        if bracket in ('(0-2)', '(4-6)', '(8-12)'):
-            p_child = max(p_child, 0.52)
+        conf = max(probabilities)
+        p_child_raw = child_probability(probabilities)
+
+        if is_close_up:
+            # Close-up adult face at webcam: weak classifier output (conf < 0.35)
+            # is flat tail noise and must not trigger child detection
+            if bracket in ('(0-2)', '(4-6)', '(8-12)') and conf >= 0.35 and p_child_raw >= 0.50:
+                p_child = p_child_raw
+            else:
+                p_child = 0.0
+        else:
+            if bracket in ('(0-2)', '(4-6)', '(8-12)'):
+                p_child = max(p_child_raw, 0.55)
+            elif bracket in ('(25-32)', '(38-43)', '(48-53)', '(60-100)'):
+                p_child = 0.0
+            else:
+                p_child = p_child_raw if CHILD_INCLUDE_TEEN else 0.0
         return p_child, bracket
 
     def _head_crop(self, frame_rgb, landmarks):
@@ -416,12 +436,14 @@ class AgeEstimator:
         best_probability = None
         best_bracket = None
         summaries = []
+        frame_width = frame_rgb.shape[1] if frame_rgb is not None else 640
         for landmarks in pose_landmarks_list[:MAX_AGE_FACES]:
             crop = self._head_crop(frame_rgb, landmarks)
             if crop is None:
                 continue
             try:
-                probability, bracket = self._classify_crop(crop)
+                is_close_up = (crop.shape[1] / frame_width >= 0.25)
+                probability, bracket = self._classify_crop(crop, is_close_up=is_close_up)
             except Exception as exc:
                 print(f"[WARN] [AGE] Head inference failed: {exc}")
                 continue
@@ -471,6 +493,7 @@ class AgeEstimator:
         summaries = []
         for detection in detections[:MAX_AGE_FACES]:
             box = detection.bounding_box
+            is_close_up = (box.width / width >= 0.25)
             # Square crop with ~20% padding, matching the model-zoo reference: the age
             # model resizes to 224x224, so a non-square crop would distort the face.
             side = int(max(box.width, box.height) * 1.2)
@@ -484,7 +507,7 @@ class AgeEstimator:
             if crop.size == 0:
                 continue
             try:
-                probability, bracket = self._classify_crop(crop)
+                probability, bracket = self._classify_crop(crop, is_close_up=is_close_up)
             except Exception as exc:
                 print(f"[WARN] [AGE] Inference failed: {exc}")
                 continue
@@ -1401,14 +1424,20 @@ class WebcamSensor:
                         raw_person_count = max(pose_count, face_count)
                         self.person_count = raw_person_count
 
-                        if p_child is not None:
+                        if self.person_count == 0:
+                            self.child_present = False
+                            self.age_decider.reset()
+                            self.pose_decider.reset()
+                            signal = "room empty (people=0)"
+                        elif p_child is not None:
                             self.last_child_source = 'age'
                             self.last_age_bracket = age_bracket
                             self.last_child_probability = p_child
                             self.child_present = self.age_decider.add_value(p_child)
                             signal = f"age p={p_child:.2f} bracket={age_bracket}"
                         elif (
-                            self.person_count > 0
+                            (age_estimator is None or not age_estimator.available)
+                            and self.person_count > 0
                             and POSE_CHILD_RATIO_MIN <= max_ratio <= POSE_CHILD_RATIO_MAX
                         ):
                             self.last_child_source = 'pose'
@@ -1416,9 +1445,8 @@ class WebcamSensor:
                             self.last_child_ratio = self.pose_decider.median
                             signal = f"pose ratio={self.pose_decider.median:.2f}"
                         else:
-                            # No usable measurement (no face, nobody counted, or an
-                            # implausible pose ratio): hold the current decision instead
-                            # of feeding noise into the decider.
+                            # No usable measurement (no face, or an implausible pose ratio):
+                            # hold the current decision instead of feeding noise into the decider.
                             signal = f"no signal (people={self.person_count})"
 
                         self.child_count = 1 if self.child_present else 0

@@ -215,6 +215,8 @@ export const VideoPlayerView = ({
     return () => clearInterval(interval);
   }, [isPlaying, isVideoLoading, durationSec]);
 
+  const isProtectionBlockedRef = useRef<boolean>(false);
+
   // Manage VideoPlayer lifecycle
   useEffect(() => {
     isMountedRef.current = true;
@@ -249,18 +251,42 @@ export const VideoPlayerView = ({
     };
 
     const onCanPlay = () => {
-      console.info('[LivingFrame Video] Event: canplay -> calling player.play()');
+      console.info('[LivingFrame Video] Event: canplay');
       if (isMountedRef.current) {
         setIsVideoLoading(false);
-        player.play().catch(e => {
-          console.warn('[LivingFrame Video] play notice:', e);
-        });
+        if (isProtectionBlockedRef.current) {
+          console.info('[LivingFrame Video] Blocked by family protection on canplay, holding playback');
+          pausedByProtectionRef.current = true;
+          try {
+            player.pause();
+          } catch (_e) {
+            // Ignore pause errors during state transition
+          }
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+        } else {
+          player.play().catch(e => {
+            console.warn('[LivingFrame Video] play notice:', e);
+          });
+        }
       }
     };
 
     const onPlaying = () => {
       console.info('[LivingFrame Video] Event: playing');
       if (isMountedRef.current) {
+        if (isProtectionBlockedRef.current) {
+          console.info('[LivingFrame Video] Blocked on playing event, pausing immediately');
+          pausedByProtectionRef.current = true;
+          try {
+            player.pause();
+          } catch (_e) {
+            // Ignore pause errors during state transition
+          }
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          return;
+        }
         setIsPlaying(true);
         isPlayingRef.current = true;
         setIsVideoLoading(false);
@@ -411,6 +437,10 @@ export const VideoPlayerView = ({
 
   // Playback control functions
   const handlePlay = useCallback(() => {
+    if (isProtectionBlockedRef.current) {
+      console.info('[LivingFrame Video] Play requested but content is protected');
+      return;
+    }
     resetHideTimer();
     if (playerRef.current) {
       try {
@@ -450,6 +480,10 @@ export const VideoPlayerView = ({
     resetHideTimer();
     if (isVideoLoading) {
       console.info('[LivingFrame Video] Ignoring toggle while video is loading');
+      return;
+    }
+    if (isProtectionBlockedRef.current) {
+      console.info('[LivingFrame Video] Toggle requested but content is protected');
       return;
     }
     if (isPlaying) {
@@ -706,6 +740,7 @@ export const VideoPlayerView = ({
     currentTimeSec,
   });
   const isProtectionBlocked = blockedSegment !== null;
+  isProtectionBlockedRef.current = isProtectionBlocked;
 
   // Contextual reaction to room entries (the policy itself follows child presence).
   // (The sensor already debounces entries, so this is not a per-frame reaction.)
@@ -733,12 +768,12 @@ export const VideoPlayerView = ({
     }
   }, [roomState.lastEvent, roomState.familyModeEnabled, showRoomNotice]);
 
-  // Turning Family Mode off clears any viewer override.
+  // Turning Family Mode off or child leaving the room clears any viewer override.
   useEffect(() => {
-    if (!roomState.familyModeEnabled) {
+    if (!roomState.familyModeEnabled || !roomState.childPresent) {
       setProtectionOverride(false);
     }
-  }, [roomState.familyModeEnabled]);
+  }, [roomState.familyModeEnabled, roomState.childPresent]);
 
   // Room stats panel: shown whenever Family Mode is switched on, hidden when off.
   // Dismissing it stays dismissed until Family Mode is toggled on again.
@@ -760,14 +795,25 @@ export const VideoPlayerView = ({
       seekRelative(blockedSegment.resumeSec - currentTimeSec);
       return;
     }
-    if (isPlayingRef.current) {
-      console.info(
-        `[LivingFrame] Family Mode blocked a "${blockedSegment.category}" segment`,
-      );
-      pausedByProtectionRef.current = true;
-      handlePause();
+    console.info(
+      `[LivingFrame] Family Mode blocked a "${blockedSegment.category}" segment`,
+    );
+    pausedByProtectionRef.current = true;
+    if (playerRef.current) {
+      try {
+        playerRef.current.pause();
+      } catch (_e) {
+        // Ignore pause errors when already stopped
+      }
     }
-  }, [isProtectionBlocked, blockedSegment, currentTimeSec, seekRelative, handlePause]);
+    if (playbackStartWallRef.current !== null) {
+      const elapsed = (Date.now() - playbackStartWallRef.current) / 1000 + pausedOffsetRef.current;
+      pausedOffsetRef.current = durationSec > 0 ? elapsed % durationSec : elapsed;
+    }
+    playbackStartWallRef.current = null;
+    setIsPlaying(false);
+    isPlayingRef.current = false;
+  }, [isProtectionBlocked, blockedSegment, currentTimeSec, durationSec, seekRelative]);
 
   // Resume automatically once the room is clear again (only if we were the ones pausing).
   useEffect(() => {
@@ -833,6 +879,16 @@ export const VideoPlayerView = ({
       return;
     }
     const eventType = evt.eventType.toLowerCase();
+
+    // If protection is blocking playback, handle back to exit or select to continue anyway
+    if (isProtectionBlocked) {
+      if (eventType === 'back') {
+        onClose();
+      } else if (eventType === 'select') {
+        setProtectionOverride(true);
+      }
+      return;
+    }
 
     // If recap modal is displayed, trap focus in the modal
     if (isShowingRecap) {
@@ -1348,27 +1404,37 @@ export const VideoPlayerView = ({
       {isProtectionBlocked && blockedSegment && (
         <View style={styles.protectionOverlay} testID="family-protection-overlay">
           <View style={styles.protectionCard}>
-            <Text style={styles.protectionBadge}>FAMILY MODE</Text>
+            <Text style={styles.protectionBadge}>FAMILY SAFETY SHIELD</Text>
             <Text style={styles.protectionTitle}>Playback paused</Text>
             <Text style={styles.protectionText}>
-              Someone joined the room during a scene tagged for{' '}
-              {blockedSegment.category.replace('_', ' ')}. This segment is not
-              family-safe.
+              A child was detected in the room during content tagged for{' '}
+              {blockedSegment.category.replace('_', ' ')}. This content is not family-safe.
             </Text>
             <Text style={styles.protectionHint}>
-              Playback resumes automatically when the room clears.
+              Playback will automatically resume when the child leaves the room.
             </Text>
             <TVFocusGuideView style={styles.protectionActions}>
               <Pressable
                 style={styles.protectionResumeBtn}
                 onPress={() => setProtectionOverride(true)}
                 accessibilityRole="button"
-                accessibilityLabel="Resume anyway"
+                accessibilityLabel="Continue anyway"
                 testID="btn-protection-resume">
                 <View style={styles.protectionResumeIcon}>
                   <Icon name="play" size={13} color="#0F172A" />
                 </View>
-                <Text style={styles.protectionResumeText}>Resume anyway</Text>
+                <Text style={styles.protectionResumeText}>Continue anyway</Text>
+              </Pressable>
+              <Pressable
+                style={styles.protectionExitBtn}
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Exit"
+                testID="btn-protection-exit">
+                <View style={styles.protectionExitIcon}>
+                  <Icon name="close" size={13} color="#F8FAFC" />
+                </View>
+                <Text style={styles.protectionExitText}>Exit</Text>
               </Pressable>
             </TVFocusGuideView>
           </View>
@@ -1747,6 +1813,8 @@ const styles = StyleSheet.create({
   },
   protectionActions: {
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
   },
   protectionResumeBtn: {
     flexDirection: 'row',
@@ -1763,6 +1831,24 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     fontSize: 15,
     fontWeight: '800',
+  },
+  protectionExitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(51, 65, 85, 0.75)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  protectionExitIcon: {
+    marginRight: 8,
+  },
+  protectionExitText: {
+    color: '#F8FAFC',
+    fontSize: 15,
+    fontWeight: '700',
   },
   topVignette: {
     position: 'absolute',

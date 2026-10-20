@@ -219,18 +219,37 @@ age_decider = w.ChildPresenceDecider(on=w.CHILD_PROB_ON, off=w.CHILD_PROB_OFF)
 adult_age = [age_decider.add_value(p) for p in (0.10, 0.15, 0.05, 0.20, 0.08, 0.12)]
 check("adult age probabilities never flag a child", any(adult_age), False)
 
-# Realistic adult webcam probability baseline (~0.31)
-adult_real_age = [age_decider.add_value(p) for p in (0.28, 0.31, 0.30, 0.29, 0.31)]
-check("realistic adult probability (~0.31) stays below threshold", any(adult_real_age), False)
+# Realistic adult webcam probability baseline
+adult_zero_age = [age_decider.add_value(p) for p in (0.0, 0.05, 0.0, 0.0, 0.0)]
+check("adult age probability (0.0) stays below threshold", any(adult_zero_age), False)
+
+# Close-up adult pose ratio (~0.54) stays below CHILD_RATIO_ON (0.58)
+check(
+    "close-up adult pose ratio (~0.54) does not reach ON threshold",
+    0.54 < w.CHILD_RATIO_ON,
+    True,
+)
 
 child_age_decider = w.ChildPresenceDecider(on=w.CHILD_PROB_ON, off=w.CHILD_PROB_OFF)
 child_age = [child_age_decider.add_value(p) for p in (0.62, 0.70, 0.58, 0.66)]
 check("high child probabilities flag a child", child_age[-1], True)
 
-# Realistic child webcam probability mass (~0.45)
+# Realistic child webcam probability mass (~0.45-0.55)
 child_calibrated_decider = w.ChildPresenceDecider(on=w.CHILD_PROB_ON, off=w.CHILD_PROB_OFF)
-child_real_states = [child_calibrated_decider.add_value(p) for p in (0.45, 0.46, 0.45, 0.47)]
-check("calibrated child probability (~0.45) reliably flags child", child_real_states[-1], True)
+child_real_states = [child_calibrated_decider.add_value(p) for p in (0.52, 0.55, 0.52, 0.54)]
+check("calibrated child probability (~0.55) reliably flags child", child_real_states[-1], True)
+
+# When child leaves and adult remains, 0.0 readings clear child presence
+adult_clearing = [child_calibrated_decider.add_value(0.0) for _ in range(5)]
+check("adult 0.0 readings reliably clear child presence", adult_clearing[-1], False)
+
+# reset() explicitly clears presence
+child_calibrated_decider.add_value(0.55)
+child_calibrated_decider.add_value(0.55)
+child_calibrated_decider.add_value(0.55)
+child_calibrated_decider.reset()
+check("reset clears child presence immediately", child_calibrated_decider.present, False)
+check("reset clears ratios", len(child_calibrated_decider.ratios), 0)
 
 print("\n== _detect_swipe (Natural Motion & Scroll Direction) ==")
 sensor = w.WebcamSensor(manual_mode=True, preview=False)
