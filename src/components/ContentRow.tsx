@@ -21,7 +21,7 @@ export const ContentRow = ({
   focusedItemId,
   onItemFocus,
   onItemSelect,
-  isFirstRow,
+  isFirstRow: _isFirstRow,
 }: ContentRowProps) => {
   const scrollViewRef = useRef<ScrollView>(null);
   const navFocus = useNavFocus();

@@ -81,5 +81,5 @@ export const useGestureNavigation = ({
       // gesture that just opened the video.
       dismissGesture();
     }
-  }, [roomState.lastEvent, enabled, grid, cursor, refs, dismissGesture]);
+  }, [roomState.lastEvent, enabled, grid, cursor, refs, dismissGesture, onNavigate]);
 };

@@ -22,6 +22,19 @@ export interface SceneSafetySegment {
   note?: string;
 }
 
+export interface TitleRecapMetadata {
+  /** Deterministic authored summary of key narrative moments up to the demo section. */
+  summary: string;
+  /** Key narrative milestones or bullet highlights. */
+  keyPlotPoints?: string[];
+  /** Optional dedicated recap clip URL if footage exists. */
+  recapVideoUrl?: string;
+  /** Coverage interval start in seconds. */
+  coverageStartSec?: number;
+  /** Coverage interval end in seconds. */
+  coverageEndSec?: number;
+}
+
 export interface MediaItem {
   id: string;
   title: string;
@@ -38,6 +51,8 @@ export interface MediaItem {
   aiContextHint?: string;
   /** Authored safety metadata for this asset; empty array means family-safe. */
   sceneSafety?: SceneSafetySegment[];
+  /** Authored narrative recap metadata for room-aware returning viewer intelligence. */
+  recap?: TitleRecapMetadata;
 }
 
 export interface ContentCategory {

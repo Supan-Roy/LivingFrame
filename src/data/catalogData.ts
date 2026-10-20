@@ -31,6 +31,18 @@ export const fallbackMediaItems: MediaItem[] = [
         note: 'Horror costumes throughout the 10s demo clip',
       },
     ],
+    // Authored deterministic recap metadata for room-aware returning viewers
+    recap: {
+      summary:
+        'Behind The Screams explores the specialized craft of Hollywood horror vocalists. Vocal coach Arthur Vance demonstrates the classic haunted house lung-burst scream technique.',
+      keyPlotPoints: [
+        'Introduction to Hollywood horror background vocal performers',
+        'Vocal coach Arthur Vance demonstrates acoustic frequency modulation',
+        'Techniques for sustained screaming without vocal chord strain',
+      ],
+      coverageStartSec: 0,
+      coverageEndSec: 5,
+    },
   },
   {
     id: 'cereal-streamz',
@@ -51,6 +63,16 @@ export const fallbackMediaItems: MediaItem[] = [
     aiContextHint: 'Morning Routine: Upbeat tone suitable for morning coffee & kids.',
     // Cartoon — family-safe for any viewer, no tagged segments.
     sceneSafety: [],
+    recap: {
+      summary:
+        'A nostalgic journey through vintage Saturday morning animation. The hosts debate legendary cereal mascots while showcasing 4K remastered animation cels.',
+      keyPlotPoints: [
+        'The golden age of Saturday morning cartoon broadcasting',
+        'Archival mascot commercial retrospectives',
+      ],
+      coverageStartSec: 0,
+      coverageEndSec: 5,
+    },
   },
   {
     id: 'feline-assistant',
@@ -71,6 +93,16 @@ export const fallbackMediaItems: MediaItem[] = [
     aiContextHint: 'Pet Alert: Low frequency purr track calms room pets.',
     // Cartoon — family-safe for any viewer, no tagged segments.
     sceneSafety: [],
+    recap: {
+      summary:
+        'Barnaby the tabby assumes command of the home office, inaugurating mandatory keyboard nap breaks and strict lap occupancy quotas.',
+      keyPlotPoints: [
+        'Barnaby promoted to SVP of Remote Ergonomics',
+        'Board unanimously ratifies daily afternoon catnap decree',
+      ],
+      coverageStartSec: 0,
+      coverageEndSec: 5,
+    },
   },
   {
     id: 'the-beige-knight',
@@ -89,6 +121,16 @@ export const fallbackMediaItems: MediaItem[] = [
     videoUrl:
       'http://10.0.2.2:8080/videos/the-beige-knight.mp4',
     aiContextHint: 'Action Mode: Rich surround effects activated.',
+    recap: {
+      summary:
+        'In the Monochrome Kingdom, Sir Donald dons the Slate Helm and stands watch on the Neutral Dunes as chromatic storms gather on the horizon.',
+      keyPlotPoints: [
+        'The silent fortress of the Monochrome Kingdom',
+        'Sir Donald receives the ancient Slate Helm',
+      ],
+      coverageStartSec: 0,
+      coverageEndSec: 5,
+    },
   },
   {
     id: 'meditation-in-beige',

@@ -413,6 +413,14 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
   ]);
 
   const triggerMockEvent = (event: Partial<RoomEvent>) => {
+    const count =
+      event.payload?.personCount ??
+      event.payload?.viewerCount ??
+      (event.payload as any)?.person_count ??
+      (event.payload as any)?.viewer_count ??
+      (typeof (event.payload as any)?.count === 'number'
+        ? (event.payload as any).count
+        : undefined);
     const fullEvent: RoomEvent = {
       id: `evt-${Date.now()}-${++eventSeqRef.current}`,
       type: event.type || 'recap_requested',
@@ -423,6 +431,11 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
       ...prev,
       lastEvent: fullEvent,
       isRecapAvailable: true,
+      viewersPresent: typeof count === 'number' ? count : prev.viewersPresent,
+      childPresent:
+        typeof event.payload?.childPresent === 'boolean'
+          ? event.payload.childPresent
+          : prev.childPresent,
     }));
   };
 

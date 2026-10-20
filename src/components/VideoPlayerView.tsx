@@ -17,10 +17,16 @@ import {
   VideoPlayer,
   KeplerVideoSurfaceView,
 } from '@amazon-devices/react-native-w3cmedia';
-import {MediaItem} from '../types/catalog';
+import {MediaItem, TitleRecapMetadata} from '../types/catalog';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
 import {findBlockingSegment} from '../room/scenePolicy';
+import {
+  RoomPlaybackEngine,
+  PlaybackPolicyAction,
+  RecapOfferState,
+  DEFAULT_PLAYBACK_INTELLIGENCE_CONFIG,
+} from '../room/playbackIntelligence';
 import {Icon} from './Icon';
 
 export interface VideoPlayerViewProps {
@@ -56,6 +62,26 @@ export const VideoPlayerView = ({
   const [roomNotice, setRoomNotice] = useState<string | null>(null);
   const [statsVisible, setStatsVisible] = useState<boolean>(false);
   const [arrivalText, setArrivalText] = useState<string | null>(null);
+
+  // --- Room-Aware Playback Intelligence state ---
+  const [recapOffer, setRecapOffer] = useState<RecapOfferState | null>(null);
+  const [isShowingRecap, setIsShowingRecap] = useState<boolean>(false);
+  const [activeRecapMeta, setActiveRecapMeta] = useState<TitleRecapMetadata | null>(null);
+  const [activeRecapResumePos, setActiveRecapResumePos] = useState<number | null>(null);
+  const [activeRecapDeparturePos, setActiveRecapDeparturePos] = useState<number>(0);
+  const [focusedOfferControl, setFocusedOfferControl] = useState<'show' | 'dismiss'>('show');
+  const [focusedModalBtn, setFocusedModalBtn] = useState<'resume' | 'skip'>('resume');
+
+  const engineRef = useRef<RoomPlaybackEngine | null>(null);
+  if (!engineRef.current) {
+    engineRef.current = new RoomPlaybackEngine(
+      item?.id || 'video',
+      durationSec,
+      DEFAULT_PLAYBACK_INTELLIGENCE_CONFIG,
+      item?.recap,
+    );
+  }
+
   const [panelOffset, setPanelOffset] = useState<{x: number; y: number}>({
     x: 0,
     y: 0,
@@ -295,7 +321,9 @@ export const VideoPlayerView = ({
       try {
         player.currentTime = 0;
         player.play().catch(() => {});
-      } catch (_e) {}
+      } catch (_e) {
+        // ignore restart error
+      }
     };
 
     player
@@ -357,7 +385,7 @@ export const VideoPlayerView = ({
       }
       playerRef.current = null;
     };
-  }, [item?.id, targetSrc, tryAttachAndLoad, resetHideTimer, showControls]);
+  }, [item?.id, targetSrc, durationSec, tryAttachAndLoad, resetHideTimer, showControls]);
 
   const handleSurfaceCreated = useCallback(
     (handle: string) => {
@@ -504,6 +532,168 @@ export const VideoPlayerView = ({
     }, 4000);
   }, []);
 
+  const seekTo = useCallback(
+    (targetSec: number) => {
+      const dur = durationSec > 0 ? durationSec : 0;
+      let target = Math.max(0, targetSec);
+      if (dur > 0 && target > dur) {
+        target = dur;
+      }
+      pausedOffsetRef.current = target;
+      if (isPlayingRef.current) {
+        playbackStartWallRef.current = Date.now();
+        seekGuardUntilRef.current = Date.now() + 600;
+      }
+      setCurrentTimeSec(target);
+      if (playerRef.current) {
+        try {
+          playerRef.current.currentTime = target;
+          if (isPlayingRef.current) {
+            playerRef.current.play().catch(() => {});
+          }
+        } catch (e) {
+          console.warn('[LivingFrame Video] Seek notice:', e);
+        }
+      }
+    },
+    [durationSec],
+  );
+
+  // --- Room-Aware Playback Intelligence handlers ---
+  const handlePolicyAction = useCallback(
+    (action: PlaybackPolicyAction) => {
+      switch (action.type) {
+        case 'PAUSE_SOLO': {
+          if (isPlayingRef.current) {
+            handlePause();
+          }
+          showRoomNotice('Room empty · Playback paused');
+          break;
+        }
+        case 'RESUME_SOLO': {
+          seekTo(action.positionSec);
+          handlePlay();
+          showRoomNotice('Viewer returned · Resuming');
+          break;
+        }
+        case 'RECORD_SHARED_DEPARTURE': {
+          // Playback continues uninterrupted for remaining viewers
+          break;
+        }
+        case 'OFFER_RECAP': {
+          setRecapOffer(action.offer);
+          setFocusedOfferControl('show');
+          break;
+        }
+        case 'START_RECAP': {
+          setRecapOffer(null);
+          setIsShowingRecap(true);
+          setActiveRecapMeta(action.metadata || null);
+          setActiveRecapResumePos(action.resumePositionSec);
+          setActiveRecapDeparturePos(
+            engineRef.current?.sharedCheckpoint?.departurePositionSec ?? 0,
+          );
+          if (isPlayingRef.current) {
+            handlePause();
+          }
+          break;
+        }
+        case 'DISMISS_RECAP': {
+          setRecapOffer(null);
+          break;
+        }
+        case 'NONE':
+        default:
+          break;
+      }
+    },
+    [handlePause, handlePlay, seekTo, showRoomNotice],
+  );
+
+  const handleAcceptRecap = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) {
+      return;
+    }
+    const action = engine.vote('remote', Date.now());
+    handlePolicyAction(action);
+  }, [handlePolicyAction]);
+
+  const handleDismissRecap = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) {
+      return;
+    }
+    const action = engine.dismissRecapOffer();
+    handlePolicyAction(action);
+  }, [handlePolicyAction]);
+
+  const handleFinishActiveRecap = useCallback(() => {
+    const engine = engineRef.current;
+    const result = engine?.finishRecap();
+    const resumeSec =
+      result?.resumePositionSec ?? activeRecapResumePos ?? currentTimeSec;
+    setIsShowingRecap(false);
+    setActiveRecapMeta(null);
+    setActiveRecapResumePos(null);
+    seekTo(resumeSec);
+    handlePlay();
+  }, [activeRecapResumePos, currentTimeSec, seekTo, handlePlay]);
+
+  // Keep engine synchronized with active player state
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine || !item) {
+      return;
+    }
+    engine.updatePlaybackState({
+      titleId: item.id,
+      durationSec,
+      currentPositionSec: currentTimeSec,
+      isPlaying: isPlayingRef.current,
+      metadata: item.recap,
+    });
+  }, [item, durationSec, currentTimeSec]);
+
+  // React to stabilized room occupancy count changes
+  const prevViewersRef = useRef<number>(roomState.viewersPresent);
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) {
+      return;
+    }
+    const currentCount = roomState.viewersPresent;
+    const previousCount = prevViewersRef.current;
+    prevViewersRef.current = currentCount;
+
+    if (currentCount !== previousCount) {
+      const action = engine.onPersonCountChange(
+        currentCount,
+        previousCount,
+        Date.now(),
+      );
+      handlePolicyAction(action);
+    }
+  }, [roomState.viewersPresent, handlePolicyAction]);
+
+  // Grace period and offer auto-dismiss ticker (200ms)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const engine = engineRef.current;
+      if (!engine) {
+        return;
+      }
+      const action = engine.checkGracePeriod(Date.now());
+      if (action.type !== 'NONE') {
+        handlePolicyAction(action);
+      }
+      if (engine.recapOffer) {
+        setRecapOffer({...engine.recapOffer});
+      }
+    }, 200);
+    return () => clearInterval(interval);
+  }, [handlePolicyAction]);
+
   // --- Family Mode / room-aware protection --------------------------------
   // A child in the room (detected, or already present when Family Mode is switched on)
   // is what arms the policy. `childPresent` is a body-proportion estimate, not identity.
@@ -604,8 +794,6 @@ export const VideoPlayerView = ({
         return;
       }
       handleTogglePlay();
-      // handleTogglePlay updates isPlayingRef synchronously, so this reflects the
-      // resulting state (previously it was inverted, showing the opposite word)
       showGestureFeedback(isPlayingRef.current ? 'Play' : 'Pause');
     } else if (gesture === 'swipe_left') {
       seekRelative(-GESTURE_SEEK_STEP_SEC);
@@ -613,6 +801,21 @@ export const VideoPlayerView = ({
     } else if (gesture === 'swipe_right') {
       seekRelative(GESTURE_SEEK_STEP_SEC);
       showGestureFeedback('Forward');
+    } else if (gesture === 'thumbs_up') {
+      const engine = engineRef.current;
+      if (recapOffer && engine) {
+        const action = engine.vote('thumbs_up', Date.now());
+        if (action.type === 'START_RECAP') {
+          handlePolicyAction(action);
+        } else {
+          showGestureFeedback('Vote Recorded');
+          if (engine.recapOffer) {
+            setRecapOffer({...engine.recapOffer});
+          }
+        }
+      } else {
+        showGestureFeedback('Thumbs Up');
+      }
     }
   }, [
     roomState.lastEvent,
@@ -620,6 +823,8 @@ export const VideoPlayerView = ({
     handleTogglePlay,
     seekRelative,
     showGestureFeedback,
+    recapOffer,
+    handlePolicyAction,
   ]);
 
   // Hardware remote key event listener
@@ -629,8 +834,47 @@ export const VideoPlayerView = ({
     }
     const eventType = evt.eventType.toLowerCase();
 
+    // If recap modal is displayed, trap focus in the modal
+    if (isShowingRecap) {
+      if (eventType === 'left' || eventType === 'up') {
+        setFocusedModalBtn('resume');
+      } else if (eventType === 'right' || eventType === 'down') {
+        setFocusedModalBtn('skip');
+      } else if (eventType === 'select') {
+        handleFinishActiveRecap();
+      } else if (eventType === 'back') {
+        handleFinishActiveRecap();
+      }
+      return;
+    }
+
+    // If recap offer banner is visible, allow remote D-pad selection
+    if (recapOffer) {
+      if (eventType === 'left') {
+        setFocusedOfferControl('show');
+        return;
+      } else if (eventType === 'right') {
+        setFocusedOfferControl('dismiss');
+        return;
+      } else if (eventType === 'select') {
+        if (focusedOfferControl === 'show') {
+          handleAcceptRecap();
+        } else {
+          handleDismissRecap();
+        }
+        return;
+      } else if (eventType === 'back') {
+        handleDismissRecap();
+        return;
+      }
+    }
+
     // If controls are hidden, any user key wakes up the controller and restarts the 5s timer
     if (!controlsVisible) {
+      if (eventType === 'back') {
+        onClose();
+        return;
+      }
       showControls();
       return;
     }
@@ -638,7 +882,9 @@ export const VideoPlayerView = ({
     // Reset 5s countdown on every interaction while controls are visible
     resetHideTimer();
 
-    if (eventType === 'play' || eventType === 'media_play') {
+    if (eventType === 'back') {
+      onClose();
+    } else if (eventType === 'play' || eventType === 'media_play') {
       handlePlay();
     } else if (eventType === 'pause' || eventType === 'media_pause') {
       handlePause();
@@ -652,7 +898,9 @@ export const VideoPlayerView = ({
       if (playerRef.current) {
         try {
           playerRef.current.currentTime = newTime;
-        } catch (_e) {}
+        } catch (_e) {
+          // ignore remote rewind error
+        }
       }
     } else if (eventType === 'fastforward' || eventType === 'media_fast_forward') {
       const newTime = Math.min(durationSec, currentTimeSec + 10);
@@ -664,7 +912,9 @@ export const VideoPlayerView = ({
       if (playerRef.current) {
         try {
           playerRef.current.currentTime = newTime;
-        } catch (_e) {}
+        } catch (_e) {
+          // ignore remote fast forward error
+        }
       }
     } else if (eventType === 'menu') {
       toggleControls();
@@ -1119,6 +1369,164 @@ export const VideoPlayerView = ({
                   <Icon name="play" size={13} color="#0F172A" />
                 </View>
                 <Text style={styles.protectionResumeText}>Resume anyway</Text>
+              </Pressable>
+            </TVFocusGuideView>
+          </View>
+        </View>
+      )}
+
+      {/* Shared Viewing: Non-blocking recap offer banner */}
+      {recapOffer && !isShowingRecap && (
+        <View style={styles.recapOfferBanner} testID="recap-offer-banner">
+          <View style={styles.recapOfferTopRow}>
+            <View style={styles.recapOfferBadge}>
+              <Icon name="spark" size={10} color="#00E5FF" />
+              <Text style={styles.recapOfferBadgeText}>SOMEONE'S BACK</Text>
+            </View>
+            <Text style={styles.recapOfferTimer}>
+              {Math.max(
+                0,
+                Math.ceil((recapOffer.expiresAtMs - Date.now()) / 1000),
+              )}
+              s
+            </Text>
+          </View>
+
+          <Text style={styles.recapOfferHeadline}>Catch them up?</Text>
+          <Text style={styles.recapOfferDetails}>
+            Missed {recapOffer.missedSec.toFixed(0)}s (
+            {(recapOffer.missedProgress * 100).toFixed(0)}% of content) • Movie keeps playing
+          </Text>
+
+          {recapOffer.requiredVotes > 1 && (
+            <View style={styles.recapVoteRow}>
+              <Text style={styles.recapVoteCount}>
+                Consensus: {recapOffer.currentVotes} / {recapOffer.requiredVotes} votes
+              </Text>
+              <Text style={styles.recapVoteHint}>
+                Thumbs-up or Remote to vote
+              </Text>
+            </View>
+          )}
+
+          <TVFocusGuideView style={styles.recapOfferActionRow}>
+            <Pressable
+              style={[
+                styles.recapOfferBtn,
+                styles.recapOfferShowBtn,
+                focusedOfferControl === 'show' && styles.recapOfferBtnFocused,
+              ]}
+              onFocus={() => setFocusedOfferControl('show')}
+              onPress={handleAcceptRecap}
+              accessibilityRole="button"
+              accessibilityLabel="Show recap"
+              testID="btn-recap-offer-show">
+              <View style={styles.recapOfferBtnIcon}>
+                <Icon name="spark" size={11} color="#0F172A" />
+              </View>
+              <Text style={styles.recapOfferShowText}>Show Recap</Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.recapOfferBtn,
+                styles.recapOfferDismissBtn,
+                focusedOfferControl === 'dismiss' && styles.recapOfferBtnFocused,
+              ]}
+              onFocus={() => setFocusedOfferControl('dismiss')}
+              onPress={handleDismissRecap}
+              accessibilityRole="button"
+              accessibilityLabel="Keep watching"
+              testID="btn-recap-offer-dismiss">
+              <Text style={styles.recapOfferDismissText}>Keep Watching</Text>
+            </Pressable>
+          </TVFocusGuideView>
+        </View>
+      )}
+
+      {/* Approved recap experience overlay */}
+      {isShowingRecap && (
+        <View style={styles.activeRecapBackdrop} testID="active-recap-overlay">
+          <View style={styles.activeRecapCard}>
+            <View style={styles.activeRecapHeader}>
+              <View style={styles.activeRecapGlowIcon}>
+                <Icon name="spark" size={20} color="#00E5FF" />
+              </View>
+              <View style={styles.activeRecapTitleBlock}>
+                <Text style={styles.activeRecapHeaderTag}>
+                  LIVINGFRAME CONTEXT CATCH-UP
+                </Text>
+                <Text style={styles.activeRecapHeaderTitle}>{item.title}</Text>
+              </View>
+            </View>
+
+            <View style={styles.activeRecapBody}>
+              <View style={styles.activeRecapNarrativeBox}>
+                <Text style={styles.activeRecapNarrativeHeading}>
+                  Missed Story Context (Zero Spoilers)
+                </Text>
+                <Text style={styles.activeRecapNarrativeText}>
+                  {activeRecapMeta?.summary ||
+                    `You stepped away while the room watched from ${formatTime(
+                      activeRecapDeparturePos,
+                    )} to ${formatTime(
+                      activeRecapResumePos ?? currentTimeSec,
+                    )}. Continuing normal playback from the room's current position.`}
+                </Text>
+
+                {activeRecapMeta?.keyPlotPoints &&
+                  activeRecapMeta.keyPlotPoints.length > 0 && (
+                    <View style={styles.activeRecapPointsList}>
+                      {activeRecapMeta.keyPlotPoints.map((point, idx) => (
+                        <View key={idx} style={styles.activeRecapPointRow}>
+                          <Text style={styles.activeRecapPointBullet}>•</Text>
+                          <Text style={styles.activeRecapPointText}>{point}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                <View style={styles.activeRecapNoticePill}>
+                  <Icon name="spark" size={10} color="#F59E0B" />
+                  <Text style={styles.activeRecapNoticeText}>
+                    Authored room-aware recap • Movie will resume at{' '}
+                    {formatTime(activeRecapResumePos ?? currentTimeSec)}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <TVFocusGuideView style={styles.activeRecapFooter}>
+              <Pressable
+                style={[
+                  styles.activeRecapResumeBtn,
+                  focusedModalBtn === 'resume' && styles.activeRecapBtnFocused,
+                ]}
+                onFocus={() => setFocusedModalBtn('resume')}
+                onPress={handleFinishActiveRecap}
+                accessibilityRole="button"
+                accessibilityLabel="Continue movie"
+                hasTVPreferredFocus
+                testID="btn-recap-modal-resume">
+                <View style={styles.activeRecapResumeIcon}>
+                  <Icon name="play" size={12} color="#0F172A" />
+                </View>
+                <Text style={styles.activeRecapResumeBtnText}>
+                  Continue Movie
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.activeRecapSkipBtn,
+                  focusedModalBtn === 'skip' && styles.activeRecapBtnFocused,
+                ]}
+                onFocus={() => setFocusedModalBtn('skip')}
+                onPress={handleFinishActiveRecap}
+                accessibilityRole="button"
+                accessibilityLabel="Skip recap"
+                testID="btn-recap-modal-skip">
+                <Text style={styles.activeRecapSkipBtnText}>Skip Recap</Text>
               </Pressable>
             </TVFocusGuideView>
           </View>
@@ -1616,5 +2024,280 @@ const styles = StyleSheet.create({
     color: '#FDE68A',
     fontSize: 15,
     fontWeight: '700',
+  },
+
+  // --- Room-Aware Recap Offer Banner Styles ---
+  recapOfferBanner: {
+    position: 'absolute',
+    top: 80,
+    right: 48,
+    width: 360,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 229, 255, 0.45)',
+    padding: 18,
+    zIndex: 60,
+    shadowColor: '#000000',
+    shadowOffset: {width: 0, height: 10},
+    shadowOpacity: 0.7,
+    shadowRadius: 20,
+  },
+  recapOfferTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  recapOfferBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 229, 255, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 229, 255, 0.35)',
+  },
+  recapOfferBadgeText: {
+    color: '#00E5FF',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginLeft: 5,
+  },
+  recapOfferTimer: {
+    color: '#94A3B8',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  recapOfferHeadline: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+    marginBottom: 4,
+  },
+  recapOfferDetails: {
+    color: '#94A3B8',
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 12,
+  },
+  recapVoteRow: {
+    backgroundColor: 'rgba(30, 41, 59, 0.7)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  recapVoteCount: {
+    color: '#FDE68A',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  recapVoteHint: {
+    color: '#94A3B8',
+    fontSize: 10,
+  },
+  recapOfferActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  recapOfferBtn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+  },
+  recapOfferShowBtn: {
+    backgroundColor: '#00E5FF',
+    borderColor: '#00E5FF',
+  },
+  recapOfferDismissBtn: {
+    backgroundColor: 'rgba(51, 65, 85, 0.6)',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  recapOfferBtnFocused: {
+    borderColor: '#FFFFFF',
+    transform: [{scale: 1.04}],
+    backgroundColor: '#FFFFFF',
+  },
+  recapOfferBtnIcon: {
+    marginRight: 6,
+  },
+  recapOfferShowText: {
+    color: '#0F172A',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  recapOfferDismissText: {
+    color: '#E2E8F0',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // --- Active Recap Experience Modal Styles ---
+  activeRecapBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(3, 7, 18, 0.94)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 90,
+  },
+  activeRecapCard: {
+    width: 680,
+    maxWidth: '90%',
+    backgroundColor: '#0B1120',
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 229, 255, 0.35)',
+    padding: 32,
+    shadowColor: '#00E5FF',
+    shadowOffset: {width: 0, height: 0},
+    shadowOpacity: 0.25,
+    shadowRadius: 30,
+  },
+  activeRecapHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    paddingBottom: 16,
+  },
+  activeRecapGlowIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0, 229, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 229, 255, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  activeRecapTitleBlock: {
+    flex: 1,
+  },
+  activeRecapHeaderTag: {
+    color: '#00E5FF',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    marginBottom: 4,
+  },
+  activeRecapHeaderTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  activeRecapBody: {
+    marginBottom: 24,
+  },
+  activeRecapNarrativeBox: {
+    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    padding: 20,
+  },
+  activeRecapNarrativeHeading: {
+    color: '#F8FAFC',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 10,
+  },
+  activeRecapNarrativeText: {
+    color: '#CBD5E1',
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: 14,
+  },
+  activeRecapPointsList: {
+    marginBottom: 14,
+    paddingLeft: 6,
+  },
+  activeRecapPointRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 6,
+  },
+  activeRecapPointBullet: {
+    color: '#00E5FF',
+    fontSize: 14,
+    marginRight: 8,
+    marginTop: -1,
+  },
+  activeRecapPointText: {
+    color: '#E2E8F0',
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
+  },
+  activeRecapNoticePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.25)',
+  },
+  activeRecapNoticeText: {
+    color: '#FDE68A',
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  activeRecapFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 14,
+  },
+  activeRecapResumeBtn: {
+    backgroundColor: '#00E5FF',
+    borderColor: '#00E5FF',
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  activeRecapSkipBtn: {
+    backgroundColor: 'rgba(51, 65, 85, 0.6)',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  activeRecapBtnFocused: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
+    transform: [{scale: 1.05}],
+  },
+  activeRecapResumeIcon: {
+    marginRight: 8,
+  },
+  activeRecapResumeBtnText: {
+    color: '#0F172A',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  activeRecapSkipBtnText: {
+    color: '#E2E8F0',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
