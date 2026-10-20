@@ -1,3 +1,27 @@
+export type SceneSafetyCategory =
+  | 'violence'
+  | 'adult_content'
+  | 'language'
+  | 'other';
+
+/**
+ * An explicitly authored, per-asset safety segment.
+ *
+ * This is hand-written metadata attached to a specific demo asset — it is NOT the
+ * result of analysing video content, and LivingFrame does not claim to detect scenes
+ * in arbitrary titles. Times are in seconds from the start of the asset.
+ */
+export interface SceneSafetySegment {
+  startSec: number;
+  endSec: number;
+  category: SceneSafetyCategory;
+  /** What to do when the playhead is inside the segment with the policy active. */
+  action: 'pause' | 'skip';
+  /** Timestamp considered safe to continue from (used by 'skip'). */
+  resumeSec: number;
+  note?: string;
+}
+
 export interface MediaItem {
   id: string;
   title: string;
@@ -12,6 +36,8 @@ export interface MediaItem {
   trending?: boolean;
   videoUrl?: string;
   aiContextHint?: string;
+  /** Authored safety metadata for this asset; empty array means family-safe. */
+  sceneSafety?: SceneSafetySegment[];
 }
 
 export interface ContentCategory {

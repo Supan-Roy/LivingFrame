@@ -19,6 +19,18 @@ export const fallbackMediaItems: MediaItem[] = [
       'http://10.0.2.2:8080/videos/behind-the-screams.mp4',
     aiContextHint:
       'Room Activity: 2 viewers engaged. Recommended for casual evening viewing.',
+    // Authored safety metadata (not content analysis). The whole 10s demo clip is
+    // horror-costume footage, so it is tagged as adult_content end to end.
+    sceneSafety: [
+      {
+        startSec: 0,
+        endSec: 10,
+        category: 'adult_content',
+        action: 'pause',
+        resumeSec: 10,
+        note: 'Horror costumes throughout the 10s demo clip',
+      },
+    ],
   },
   {
     id: 'cereal-streamz',
@@ -37,6 +49,8 @@ export const fallbackMediaItems: MediaItem[] = [
     videoUrl:
       'http://10.0.2.2:8080/videos/cereal-streamz.mp4',
     aiContextHint: 'Morning Routine: Upbeat tone suitable for morning coffee & kids.',
+    // Cartoon — family-safe for any viewer, no tagged segments.
+    sceneSafety: [],
   },
   {
     id: 'feline-assistant',
@@ -55,6 +69,8 @@ export const fallbackMediaItems: MediaItem[] = [
     videoUrl:
       'http://10.0.2.2:8080/videos/feline-assistant.mp4',
     aiContextHint: 'Pet Alert: Low frequency purr track calms room pets.',
+    // Cartoon — family-safe for any viewer, no tagged segments.
+    sceneSafety: [],
   },
   {
     id: 'the-beige-knight',

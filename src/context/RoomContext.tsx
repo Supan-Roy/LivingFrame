@@ -20,6 +20,7 @@ interface RoomContextValue {
   reconnectServer: () => void;
   dismissGesture: () => void;
   sendVisionCommand: (enabled: boolean) => void;
+  setFamilyMode: (enabled: boolean) => void;
 }
 
 const defaultRoomState: RoomState = {
@@ -34,6 +35,7 @@ const defaultRoomState: RoomState = {
   activeGesture: null,
   gestureTimestamp: null,
   visionEnabled: false,
+  familyModeEnabled: false,
 };
 
 const RoomContext = createContext<RoomContextValue>({
@@ -43,6 +45,7 @@ const RoomContext = createContext<RoomContextValue>({
   reconnectServer: () => {},
   dismissGesture: () => {},
   sendVisionCommand: () => {},
+  setFamilyMode: () => {},
 });
 
 export const RoomProvider = ({children}: {children: ReactNode}) => {
@@ -209,6 +212,28 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
                 payload: parsed.payload || {},
               },
             }));
+          } else if (parsed.type === 'person_entered' || parsed.type === 'person_left') {
+            const count =
+              parsed.payload?.personCount ?? parsed.payload?.count ?? parsed.count;
+            console.log(
+              `[LivingFrame WS] ROOM EVENT: ${parsed.type} (${count} in view, source=${
+                parsed.source || 'webcam'
+              })`,
+            );
+            setRoomState((prev) => ({
+              ...prev,
+              viewersPresent: typeof count === 'number' ? count : prev.viewersPresent,
+              lastEvent: {
+                id: `evt-${Date.now()}-${++eventSeqRef.current}`,
+                type: parsed.type,
+                timestamp: parsed.timestamp || Date.now(),
+                payload: {
+                  ...(parsed.payload || {}),
+                  personCount: typeof count === 'number' ? count : undefined,
+                  source: parsed.source || 'webcam',
+                },
+              },
+            }));
           } else if (parsed.type === 'vision_status') {
             console.log(`[LivingFrame WS] VISION STATUS: enabled=${!!parsed.enabled}`);
             setRoomState((prev) => ({
@@ -306,6 +331,14 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
     }
   }, []);
 
+  const setFamilyMode = useCallback((enabled: boolean) => {
+    console.log(`[LivingFrame] Family Mode ${enabled ? 'enabled' : 'disabled'}`);
+    setRoomState((prev) => ({
+      ...prev,
+      familyModeEnabled: enabled,
+    }));
+  }, []);
+
   const triggerMockEvent = (event: Partial<RoomEvent>) => {
     const fullEvent: RoomEvent = {
       id: `evt-${Date.now()}-${++eventSeqRef.current}`,
@@ -336,6 +369,7 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
         reconnectServer,
         dismissGesture,
         sendVisionCommand,
+        setFamilyMode,
       }}>
       {children}
     </RoomContext.Provider>

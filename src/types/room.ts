@@ -31,6 +31,8 @@ export interface RoomEvent {
   type:
     | 'viewer_entered'
     | 'viewer_left'
+    | 'person_entered'
+    | 'person_left'
     | 'gesture_detected'
     | 'recap_requested'
     | 'connectivity_test'
@@ -42,6 +44,10 @@ export interface RoomEvent {
     gesture?: RoomGestureType;
     message?: string;
     itemId?: string;
+    personCount?: number;
+    previousCount?: number;
+    delta?: number;
+    source?: string;
   };
 }
 
@@ -58,4 +64,6 @@ export interface RoomState {
   activeGesture?: RoomGestureType | null;
   gestureTimestamp?: number | null;
   visionEnabled: boolean;
+  /** Viewer preference: when on, room changes can trigger family-safe playback. */
+  familyModeEnabled: boolean;
 }

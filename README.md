@@ -236,7 +236,55 @@ npm test -- --runInBand
 
 ---
 
-## 7. License & Community
+## 7. Room-Aware Playback (Family Mode) — Demo
+
+LivingFrame reacts to changes in the **room**, not just to hand gestures.
+
+**Presence detection (local, no cloud).** The sensor runs MediaPipe's Pose Landmarker
+(lite, ~5.8 MB) on a fraction of camera frames and emits `person_entered` / `person_left`
+over the existing WebSocket. It counts **visible people only** — no identity, age, or face
+recognition. Download the model once:
+
+```bash
+curl -L -o models/pose_landmarker_lite.task \
+  https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
+```
+
+If it is missing, gesture control still works and presence detection is simply disabled.
+
+**Family Mode.** In the player header, toggle **👨‍👩‍👧 FAMILY ON**. When Family Mode is on
+and a new person enters, the room policy arms. If the playhead is inside a scene tagged in
+the asset's authored metadata, playback **pauses**, the picture is covered, and a warning
+explains why. Playback resumes automatically when the room clears, or via *Resume anyway*.
+With Family Mode off, playback is completely unaffected.
+
+**Authored safety metadata** (`src/data/catalogData.ts`) — hand-written per demo asset,
+not content analysis: `Behind The Screams` is tagged `adult_content` for its whole 10 s
+clip; `Cereal Streamz` and `Feline Assistant` are marked family-safe.
+
+**Manual room triggers** (test playback behaviour without a camera):
+```bash
+curl -s "http://localhost:8080/room/person_entered?count=2"
+curl -s "http://localhost:8080/room/person_left?count=1"
+curl -s "http://localhost:8080/room/events"
+```
+The dashboard (`/camera`) shows the live **people in view** count and a room-event log, and
+labels manual events as `manual trigger` so they are distinguishable from real detection.
+
+**Deterministic demo**
+1. Start the server, Metro and the Vega app; play **Behind The Screams**.
+2. In the player, turn **FAMILY ON**.
+3. Let a second person enter (or trigger `person_entered`) — the dashboard logs the event.
+4. The TV pauses, blacks out, and explains why.
+5. Trigger `person_left` → playback resumes automatically.
+6. Turn **FAMILY OFF** and repeat: playback continues untouched.
+
+**Tests:** `npm test -- --runInBand` (scene-policy + catalog metadata) and
+`.venv/bin/python test/presence_stabilizer_test.py` (presence debounce/cooldown).
+
+---
+
+## 8. License & Community
 
 - **License**: Released under the [MIT License](./LICENSE) &copy; 2026 Supan Roy.
 - **Security Policy**: See [SECURITY.md](./SECURITY.md) for vulnerability reporting.

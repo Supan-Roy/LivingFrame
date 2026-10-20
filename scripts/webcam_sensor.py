@@ -8,6 +8,8 @@ using Google MediaPipe ML and dispatches real-time events to the local WebSocket
 Features:
 - Primary Engine: Pretrained MediaPipe Gesture Recognizer (Hand Raised, Closed Fist, Thumbs Up)
 - Playback Control: Open palm (hand raise) toggles pause/play; horizontal swipes seek +/- 5s
+- Room Presence: MediaPipe Pose Landmarker counts visible people and emits
+  person_entered / person_left room events (presence only — never identity)
 - Fallback Engine: Lightweight heuristic YCbCr skin-tone detector (--engine heuristic)
 - Zero Cloud/Streaming: Raw video never leaves memory; 100% on-device inference
 - Dual Visual Previews: Native desktop popup window + live web dashboard at /camera
@@ -59,6 +61,16 @@ from PIL import Image
 DEFAULT_DEVICE = '/dev/video0'
 DEFAULT_SERVER = 'http://localhost:8080'
 DEFAULT_MODEL = os.path.join(PROJECT_ROOT, 'models', 'gesture_recognizer.task')
+DEFAULT_POSE_MODEL = os.path.join(PROJECT_ROOT, 'models', 'pose_landmarker_lite.task')
+
+# Room presence (visible person count) detection.
+# Presence changes slowly, so the pose model runs on a fraction of frames to keep the
+# gesture pipeline at full rate.
+PRESENCE_FRAME_INTERVAL = 5      # run the pose model every N frames (~2 Hz at 10 fps)
+PRESENCE_MAX_POSES = 3           # up to this many visible people are counted
+PRESENCE_WINDOW = 5              # rolling window of raw counts used for stabilisation
+PRESENCE_CONFIRM_SAMPLES = 3     # sustained samples required to confirm a change
+PRESENCE_COOLDOWN_SEC = 3.0      # minimum gap between person_entered/person_left events
 
 # MediaPipe Hand Landmarks Skeleton Connections
 HAND_CONNECTIONS = [
@@ -106,6 +118,98 @@ SWIPE_LABELS = {
 }
 
 
+class PresenceStabilizer:
+    """Turns noisy per-sample person counts into stable enter/leave events.
+
+    Pure logic (no MediaPipe / camera dependency) so it can be unit-tested directly.
+
+    Action plan:
+      * establish a baseline once enough samples exist
+      * a change is only *confirmed* when the same stable count persists across
+        several samples (debounce)
+      * confirmed changes are rate-limited by a cooldown
+    """
+
+    def __init__(self, window=PRESENCE_WINDOW, confirm=PRESENCE_CONFIRM_SAMPLES,
+                 cooldown=PRESENCE_COOLDOWN_SEC):
+        self.window = window
+        self.confirm = confirm
+        self.cooldown = cooldown
+        self.samples = deque(maxlen=window)
+        self.confirmed = None          # last confirmed person count
+        self.pending_value = None
+        self.pending_count = 0
+        self.last_event_time = None
+
+    def stable_count(self):
+        """Majority vote over the rolling window (ties favour the higher count)."""
+        if not self.samples:
+            return 0
+        votes = {}
+        for count in self.samples:
+            votes[count] = votes.get(count, 0) + 1
+        return max(votes.items(), key=lambda item: (item[1], item[0]))[0]
+
+    def add_sample(self, count, now):
+        """Feed a raw count. Returns (event_type, count, previous) or None.
+
+        A change is confirmed only when the same count is seen for `confirm`
+        consecutive samples, so a single flickering sample can never fire an event.
+        """
+        self.samples.append(count)
+
+        if self.confirmed is None:
+            # Baseline after the first few samples, so startup noise cannot fire an event
+            if len(self.samples) >= self.confirm:
+                self.confirmed = count
+            return None
+
+        if count == self.confirmed:
+            self.pending_value = None
+            self.pending_count = 0
+            return None
+
+        if count == self.pending_value:
+            self.pending_count += 1
+        else:
+            self.pending_value = count
+            self.pending_count = 1
+
+        if self.pending_count < self.confirm:
+            return None
+
+        if self.last_event_time is not None and (now - self.last_event_time) < self.cooldown:
+            return None
+
+        previous = self.confirmed
+        event_type = 'person_entered' if count > previous else 'person_left'
+        self.confirmed = count
+        self.last_event_time = now
+        self.pending_value = None
+        self.pending_count = 0
+        return event_type, count, previous
+
+
+def count_visible_poses(result, min_visibility=0.3, min_visible_landmarks=6):
+    """Count poses that really have enough visible landmarks.
+
+    Presence only — never identity. Guards against MediaPipe emitting low-confidence
+    'ghost' poses when nobody is clearly in frame.
+    """
+    if not result or not getattr(result, 'pose_landmarks', None):
+        return 0
+    count = 0
+    for landmarks in result.pose_landmarks:
+        visible = sum(
+            1 for lm in landmarks
+            if getattr(lm, 'visibility', 1.0) is not None
+            and getattr(lm, 'visibility', 1.0) >= min_visibility
+        )
+        if visible >= min_visible_landmarks:
+            count += 1
+    return count
+
+
 class FrameUploader(threading.Thread):
     """Asynchronous background worker to POST frames and telemetry to web dashboard."""
     def __init__(self, server_url):
@@ -148,6 +252,7 @@ class WebcamSensor:
         server_url=DEFAULT_SERVER,
         engine='mediapipe',
         model_path=DEFAULT_MODEL,
+        pose_model_path=DEFAULT_POSE_MODEL,
         min_confidence=0.65,
         manual_mode=False,
         simulate_mode=False,
@@ -157,6 +262,7 @@ class WebcamSensor:
         self.server_url = server_url.rstrip('/')
         self.engine = engine.lower()
         self.model_path = model_path
+        self.pose_model_path = pose_model_path
         self.min_confidence = min_confidence
         self.manual_mode = manual_mode
         self.simulate_mode = simulate_mode
@@ -180,6 +286,11 @@ class WebcamSensor:
         self.swipe_suppress_until = 0.0
         self.motion_history = deque(maxlen=30)
         self.swipe_debug = os.environ.get('LIVINGFRAME_SWIPE_DEBUG') == '1'
+
+        # Room presence (visible person count) state
+        self.presence = PresenceStabilizer()
+        self.person_count = 0
+        self.room_event_log = deque(maxlen=20)
 
         # Heuristic parameters (for fallback mode)
         self.upper_zone_fraction = 0.35
@@ -237,6 +348,40 @@ class WebcamSensor:
             return False
         except Exception as e:
             print(f"⚠️ [EVENT ERROR] {e}")
+            return False
+
+    def send_room_event(self, event_type, count, previous, source='webcam'):
+        """Send a structured room-presence event (person_entered / person_left)."""
+        verb = 'entered' if event_type == 'person_entered' else 'left'
+        message = f"Person {verb} · {count} in view"
+        payload = {
+            'type': event_type,
+            'source': source,
+            'message': message,
+            'payload': {
+                'personCount': count,
+                'count': count,
+                'previousCount': previous,
+                'delta': count - previous,
+            },
+            'timestamp': int(time.time() * 1000),
+        }
+        try:
+            req = urllib.request.Request(
+                f"{self.server_url}/trigger",
+                data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                result = json.loads(resp.read().decode('utf-8'))
+            clients = result.get('clientsNotified', 0)
+            emoji = '👥' if event_type == 'person_entered' else '👋'
+            print(f"{emoji} [ROOM EVENT] {event_type} count={count} (was {previous}) -> {clients} client(s)")
+            self.room_event_log.append((payload['timestamp'], event_type, count))
+            return True
+        except Exception as e:
+            print(f"⚠️ [ROOM EVENT FAILED] {e}")
             return False
 
     def _detect_swipe(self, results, now):
@@ -576,6 +721,32 @@ class WebcamSensor:
             self.run_heuristic_mode()
             return
 
+        # Step 3b: Pose Landmarker for room presence (visible person count).
+        # Optional — if the model is absent the sensor still runs gesture-only.
+        pose_landmarker = None
+        if not os.path.exists(self.pose_model_path):
+            print(f"⚠️ [PRESENCE] Pose model not found at '{self.pose_model_path}'.")
+            print("   Room presence detection disabled (gesture control is unaffected).")
+            print("   Download it with:")
+            print("     curl -L -o models/pose_landmarker_lite.task \\")
+            print("       https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task")
+        else:
+            try:
+                print(f"[PRESENCE INIT] Loading Pose Landmarker from {os.path.basename(self.pose_model_path)}...")
+                pose_options = mp_vision.PoseLandmarkerOptions(
+                    base_options=mp_python.BaseOptions(model_asset_path=self.pose_model_path),
+                    running_mode=mp_vision.RunningMode.IMAGE,
+                    num_poses=PRESENCE_MAX_POSES,
+                    min_pose_detection_confidence=0.5,
+                    min_pose_presence_confidence=0.5,
+                    min_tracking_confidence=0.5,
+                )
+                pose_landmarker = mp_vision.PoseLandmarker.create_from_options(pose_options)
+                print(f"✅ [PRESENCE READY] Pose Landmarker · up to {PRESENCE_MAX_POSES} people · sampled every {PRESENCE_FRAME_INTERVAL} frames")
+            except Exception as e:
+                print(f"⚠️ [PRESENCE] Could not start Pose Landmarker: {e}")
+                pose_landmarker = None
+
         # Step 4: Video capture pipeline
         width = 320
         height = 240
@@ -623,6 +794,7 @@ class WebcamSensor:
         print(f"Resolution     : {width}x{height} @ 10fps (in-memory)")
         print(f"Min Confidence : {int(self.min_confidence * 100)}%")
         print(f"Supported ML   : Hand Raised ✋ | Thumbs Up 👍 | Closed Fist ✊ | Swipe ⏪⏩")
+        print(f"Room Presence  : {'Pose Landmarker · up to ' + str(PRESENCE_MAX_POSES) + ' people' if pose_landmarker is not None else 'DISABLED (pose model missing)'}")
         print(f"Desktop Window : {'ENABLED (Native Popup on Desktop)' if preview_window else 'DISABLED (Headless)'}")
         print(f"Web Dashboard  : {self.server_url}/camera (Live video + landmarks)")
         print(f"Privacy Mode   : 100% Local Inference (Zero cloud/streaming)")
@@ -773,6 +945,23 @@ class WebcamSensor:
                         if time_since_trigger > 1.5:
                             self.is_gesture_active = False
 
+                # --- Room presence: count visible people on a fraction of frames ---
+                if pose_landmarker is not None and (frame_idx % PRESENCE_FRAME_INTERVAL == 0):
+                    try:
+                        # Reuse the frame already prepared for gesture recognition
+                        pose_result = pose_landmarker.detect(mp_image)
+                        self.person_count = count_visible_poses(pose_result)
+                        presence_event = self.presence.add_sample(self.person_count, now)
+                        if presence_event:
+                            event_type, count, previous = presence_event
+                            self.send_room_event(event_type, count, previous)
+                        if len(results.hand_landmarks or []) == 0:
+                            # Draw the count on the preview only when no hand label is shown
+                            cv2.putText(annotated_rgb, f"People: {self.person_count}",
+                                        (8, height - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 229, 255), 1)
+                    except Exception as e:
+                        print(f"[PRESENCE WARN] Frame error: {e}")
+
                 # Upload frame to web dashboard every 2nd frame (~5 fps upload)
                 if frame_idx % 2 == 0:
                     try:
@@ -786,6 +975,7 @@ class WebcamSensor:
                             'X-Message': f"{gesture_emoji} {gesture_desc}" if (mapped_gesture and gesture_emoji) else '',
                             'X-Confidence': f"{detected_score:.2f}",
                             'X-Handedness': detected_hand,
+                            'X-Person-Count': str(self.person_count),
                             'X-FPS': f"{current_fps:.1f}",
                         }
                         self.uploader.post_frame(bio.getvalue(), headers)
@@ -797,7 +987,7 @@ class WebcamSensor:
                     current_fps = fps_count / (now - fps_start)
                     hands_count = len(results.hand_landmarks) if results.hand_landmarks else 0
                     top_label = detected_category if (detected_category and detected_category != 'None') else 'None'
-                    print(f"[ML RUNNING] ~{current_fps:.1f} fps | Hands detected: {hands_count} | Active: {top_label} ({detected_score*100:.0f}%)", end='\r', flush=True)
+                    print(f"[ML RUNNING] ~{current_fps:.1f} fps | Hands: {hands_count} | People: {self.person_count} | Active: {top_label} ({detected_score*100:.0f}%)", end='\r', flush=True)
                     fps_count = 0
                     fps_start = now
 
@@ -828,6 +1018,7 @@ def main():
     parser = argparse.ArgumentParser(description='LivingFrame Laptop Webcam Room Sensor')
     parser.add_argument('--engine', choices=['mediapipe', 'heuristic'], default='mediapipe', help='Gesture detection engine (default: mediapipe)')
     parser.add_argument('--model', default=DEFAULT_MODEL, help='Path to MediaPipe gesture_recognizer.task model')
+    parser.add_argument('--pose-model', default=DEFAULT_POSE_MODEL, help='Path to MediaPipe pose_landmarker_lite.task model (room presence)')
     parser.add_argument('--confidence', type=float, default=0.55, help='Minimum confidence threshold for ML gesture detection (default: 0.55)')
     parser.add_argument('--device', default=DEFAULT_DEVICE, help='V4L2 camera device (default: /dev/video0)')
     parser.add_argument('--server', default=DEFAULT_SERVER, help='WebSocket/HTTP server URL (default: http://localhost:8080)')
@@ -842,6 +1033,7 @@ def main():
         server_url=args.server,
         engine=args.engine,
         model_path=args.model,
+        pose_model_path=args.pose_model,
         min_confidence=args.confidence,
         manual_mode=args.manual,
         simulate_mode=args.simulate,

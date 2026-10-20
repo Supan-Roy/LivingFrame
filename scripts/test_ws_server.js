@@ -180,6 +180,26 @@ let latestSensorTelemetry = {
   timestamp: Date.now(),
 };
 
+// Recent room-presence events, surfaced on the dashboard log
+const roomEvents = [];
+
+function recordRoomEvent(payload) {
+  if (!payload || typeof payload.type !== 'string' || !payload.type.startsWith('person_')) {
+    return;
+  }
+  roomEvents.push({
+    type: payload.type,
+    count: payload.payload?.personCount ?? payload.payload?.count ?? null,
+    previousCount: payload.payload?.previousCount ?? null,
+    source: payload.source || 'webcam',
+    message: payload.message || '',
+    timestamp: payload.timestamp || Date.now(),
+  });
+  if (roomEvents.length > 20) {
+    roomEvents.shift();
+  }
+}
+
 // Create HTTP server
 const server = http.createServer((req, res) => {
   const url = req.url || '/';
@@ -259,6 +279,7 @@ const server = http.createServer((req, res) => {
           baseline: parseInt(req.headers['x-baseline'], 10) || 0,
           delta: parseInt(req.headers['x-delta'], 10) || 0,
           fps: parseFloat(req.headers['x-fps']) || 0,
+          personCount: parseInt(req.headers['x-person-count'], 10) || 0,
           timestamp: Date.now(),
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -415,7 +436,7 @@ const server = http.createServer((req, res) => {
     @keyframes bounce { 0% { transform: translate(-50%, -10px); } 100% { transform: translate(-50%, 0); } }
     .metrics-bar {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       padding: 14px 20px;
       background: rgba(15, 23, 42, 0.9);
       border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -448,6 +469,26 @@ const server = http.createServer((req, res) => {
       cursor: pointer;
     }
     .btn-manual:active { transform: scale(0.96); }
+    .room-log {
+      width: 100%;
+      max-width: 680px;
+      margin-top: 16px;
+      background: #0F172A;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 14px;
+      padding: 14px 18px;
+    }
+    .room-log-title {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: #64748B;
+      margin-bottom: 8px;
+    }
+    .room-log-list { font-size: 12px; color: #CBD5E1; line-height: 18px; }
+    .room-log-list .evt-enter { color: #34D399; font-weight: 700; }
+    .room-log-list .evt-left { color: #FBBF24; font-weight: 700; }
+    .room-log-list .evt-src { color: #64748B; }
   </style>
 </head>
 <body>
@@ -493,7 +534,16 @@ const server = http.createServer((req, res) => {
         <span class="metric-label">CAMERA FPS</span>
         <span id="metric-fps" class="metric-val">-- fps</span>
       </div>
+      <div class="metric">
+        <span class="metric-label">PEOPLE IN VIEW</span>
+        <span id="metric-people" class="metric-val cyan">0</span>
+      </div>
     </div>
+  </div>
+
+  <div class="room-log">
+    <div class="room-log-title">ROOM EVENTS (person_entered / person_left)</div>
+    <div id="room-log-list" class="room-log-list">No room events yet.</div>
   </div>
 
   <div class="footer">
@@ -504,6 +554,8 @@ const server = http.createServer((req, res) => {
       <button class="btn-manual" onclick="fetch('/gesture/swipe_right').then(r=>r.json()).then(d=>console.log(d))">⏩ Swipe Right</button>
       <button class="btn-manual" onclick="fetch('/gesture/thumbs_up').then(r=>r.json()).then(d=>console.log(d))">👍 Thumbs Up</button>
       <button class="btn-manual" onclick="fetch('/gesture/closed_fist').then(r=>r.json()).then(d=>console.log(d))">✊ Closed Fist</button>
+      <button class="btn-manual" onclick="fetch('/room/person_entered').then(r=>r.json()).then(d=>console.log(d))">👥 Person Entered</button>
+      <button class="btn-manual" onclick="fetch('/room/person_left').then(r=>r.json()).then(d=>console.log(d))">👋 Person Left</button>
     </div>
   </div>
 
@@ -514,6 +566,8 @@ const server = http.createServer((req, res) => {
     const metricGesture = document.getElementById('metric-gesture');
     const metricConf = document.getElementById('metric-conf');
     const metricFps = document.getElementById('metric-fps');
+    const metricPeople = document.getElementById('metric-people');
+    const roomLogList = document.getElementById('room-log-list');
     let alertTimer = null;
 
     // Refresh image feed smoothly
@@ -529,6 +583,7 @@ const server = http.createServer((req, res) => {
         const data = await res.json();
         metricEngine.innerText = (data.engine === 'mediapipe' ? 'MediaPipe ML' : 'Heuristic');
         metricFps.innerText = (data.fps || 10).toFixed(1) + ' fps';
+        metricPeople.innerText = String(data.personCount || 0);
         
         if (data.activeGesture && data.activeGesture !== 'None') {
           const emojiMap = { open_palm: '✋', hand_raised: '✋', thumbs_up: '👍', closed_fist: '✊', point_to_screen: '👆', victory: '✌️', swipe_left: '⏪', swipe_right: '⏩' };
@@ -547,10 +602,74 @@ const server = http.createServer((req, res) => {
         }
       } catch (err) {}
     }, 250);
+
+    // Room-presence event log
+    setInterval(async () => {
+      try {
+        const res = await fetch('/room/events');
+        if (!res.ok) return;
+        const data = await res.json();
+        const events = (data.events || []).slice().reverse();
+        if (!events.length) {
+          roomLogList.innerHTML = 'No room events yet.';
+          return;
+        }
+        roomLogList.innerHTML = events
+          .map(e => {
+            const t = new Date(e.timestamp).toLocaleTimeString();
+            const cls = e.type === 'person_entered' ? 'evt-enter' : 'evt-left';
+            const label = e.type === 'person_entered' ? 'ENTERED' : 'LEFT';
+            const src = e.source === 'manual' ? 'manual trigger' : 'webcam';
+            return '<div>' + t + ' &middot; <span class="' + cls + '">' + label +
+              '</span> &middot; ' + e.count + ' in view <span class="evt-src">(' + src + ')</span></div>';
+          })
+          .join('');
+      } catch (err) {}
+    }, 1000);
   </script>
 </body>
 </html>`);
     return;
+  }
+
+  // Room-presence endpoints
+  //   GET /room/events            -> recent room events (dashboard log)
+  //   GET /room/person_entered    -> manual person-entered event (testing)
+  //   GET /room/person_left       -> manual person-left event (testing)
+  if (url.startsWith('/room/')) {
+    if (url.startsWith('/room/events')) {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ events: roomEvents }));
+      return;
+    }
+
+    if (url.startsWith('/room/person_entered') || url.startsWith('/room/person_left')) {
+      const entered = url.startsWith('/room/person_entered');
+      const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      const rawCount = parseInt(parsedUrl.searchParams.get('count'), 10);
+      const currentCount = Number.isFinite(rawCount) ? rawCount : (entered ? 2 : 1);
+      const previousCount = entered ? Math.max(0, currentCount - 1) : currentCount + 1;
+      const manualPayload = {
+        type: entered ? 'person_entered' : 'person_left',
+        source: 'manual',
+        message: entered
+          ? `Person entered · ${currentCount} in view (manual)`
+          : `Person left · ${currentCount} in view (manual)`,
+        payload: {
+          personCount: currentCount,
+          count: currentCount,
+          previousCount,
+          delta: currentCount - previousCount,
+        },
+        timestamp: Date.now(),
+      };
+      recordRoomEvent(manualPayload);
+      const notified = broadcast(manualPayload);
+      console.log(`[ROOM] Manual ${manualPayload.type} (count=${currentCount}) -> ${notified} client(s)`);
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ status: 'event_dispatched', source: 'manual', clientsNotified: notified, event: manualPayload }));
+      return;
+    }
   }
 
   // Handle gesture trigger and manual test endpoints (GET or POST)
@@ -570,11 +689,14 @@ const server = http.createServer((req, res) => {
             confidence: parsed.confidence,
             handedness: parsed.handedness,
             engine: parsed.engine || 'mediapipe',
+            source: parsed.source,
             message: parsed.message || (gesture ? `${gesture.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} Detected` : 'Event from Laptop Sensor'),
             itemId: parsed.itemId,
-            payload: { itemId: parsed.itemId },
+            // Pass the client's structured payload through (personCount, etc.)
+            payload: {...(parsed.payload || {}), itemId: parsed.itemId},
             timestamp: parsed.timestamp || Date.now(),
           };
+          recordRoomEvent(payload);
           const count = broadcast(payload);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ status: 'event_dispatched', clientsNotified: count, event: payload }));

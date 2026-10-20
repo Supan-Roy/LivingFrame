@@ -20,6 +20,7 @@ import {MediaItem} from '../types/catalog';
 import {RoomGestureType} from '../types/room';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
+import {findBlockingSegment} from '../room/scenePolicy';
 import {GestureReactionOverlay} from './GestureReactionOverlay';
 
 export interface VideoPlayerViewProps {
@@ -55,10 +56,11 @@ export const VideoPlayerView = ({
   );
   const [isVideoLoading, setIsVideoLoading] = useState<boolean>(true);
   const [focusedControl, setFocusedControl] = useState<
-    'back' | 'play' | 'restart' | 'recap' | 'gesture'
+    'back' | 'play' | 'restart' | 'recap' | 'gesture' | 'family'
   >('play');
   const [controlsVisible, setControlsVisible] = useState<boolean>(true);
   const [gestureFeedback, setGestureFeedback] = useState<string | null>(null);
+  const [roomNotice, setRoomNotice] = useState<string | null>(null);
 
   const playerRef = useRef<VideoPlayer | null>(null);
   const surfaceHandleRef = useRef<string | null>(null);
@@ -72,8 +74,15 @@ export const VideoPlayerView = ({
   const isInitializedRef = useRef<boolean>(false);
   const isLoadedRef = useRef<boolean>(false);
   const gestureFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const {roomState, sendVisionCommand} = useRoom();
+  const roomNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const {roomState, sendVisionCommand, setFamilyMode} = useRoom();
   const lastGestureEventIdRef = useRef<string | null>(roomState.lastEvent?.id ?? null);
+
+  // --- Family Mode / room-aware protection state ---
+  const [protectionArmed, setProtectionArmed] = useState<boolean>(false);
+  const [protectionOverride, setProtectionOverride] = useState<boolean>(false);
+  const pausedByProtectionRef = useRef<boolean>(false);
+  const lastRoomEventIdRef = useRef<string | null>(roomState.lastEvent?.id ?? null);
 
   const targetSrc = item?.videoUrl || (item?.id ? `http://10.0.2.2:8080/videos/${item.id}.mp4` : '');
 
@@ -295,6 +304,9 @@ export const VideoPlayerView = ({
       if (gestureFeedbackTimerRef.current) {
         clearTimeout(gestureFeedbackTimerRef.current);
       }
+      if (roomNoticeTimerRef.current) {
+        clearTimeout(roomNoticeTimerRef.current);
+      }
       try {
         player.pause();
         if (surfaceHandleRef.current) {
@@ -449,6 +461,84 @@ export const VideoPlayerView = ({
     [currentTimeSec, durationSec],
   );
 
+  const showRoomNotice = useCallback((message: string) => {
+    setRoomNotice(message);
+    if (roomNoticeTimerRef.current) {
+      clearTimeout(roomNoticeTimerRef.current);
+    }
+    roomNoticeTimerRef.current = setTimeout(() => {
+      if (isMountedRef.current) {
+        setRoomNotice(null);
+      }
+    }, 4000);
+  }, []);
+
+  // --- Family Mode / room-aware protection --------------------------------
+  const safetySegments = item?.sceneSafety ?? [];
+  const blockedSegment = findBlockingSegment({
+    familyModeEnabled: roomState.familyModeEnabled,
+    armed: protectionArmed,
+    override: protectionOverride,
+    segments: safetySegments,
+    currentTimeSec,
+  });
+  const isProtectionBlocked = blockedSegment !== null;
+
+  // A person entering while Family Mode is on arms the policy; leaving disarms it.
+  // (The sensor already debounces entries, so this is not a per-frame reaction.)
+  useEffect(() => {
+    const event = roomState.lastEvent;
+    if (!event || event.id === lastRoomEventIdRef.current) {
+      return;
+    }
+    lastRoomEventIdRef.current = event.id;
+
+    if (event.type === 'person_entered') {
+      if (!roomState.familyModeEnabled) {
+        return;
+      }
+      setProtectionArmed(true);
+      setProtectionOverride(false);
+      showRoomNotice('👤 Someone joined the room · Family Mode active');
+    } else if (event.type === 'person_left') {
+      setProtectionArmed(false);
+    }
+  }, [roomState.lastEvent, roomState.familyModeEnabled, showRoomNotice]);
+
+  // Turning Family Mode off clears any active policy.
+  useEffect(() => {
+    if (!roomState.familyModeEnabled) {
+      setProtectionArmed(false);
+      setProtectionOverride(false);
+    }
+  }, [roomState.familyModeEnabled]);
+
+  // Handle the playhead being inside a tagged segment: skip it, or pause with a reason.
+  useEffect(() => {
+    if (!isProtectionBlocked || !blockedSegment) {
+      return;
+    }
+    if (blockedSegment.action === 'skip') {
+      seekRelative(blockedSegment.resumeSec - currentTimeSec);
+      return;
+    }
+    if (isPlayingRef.current) {
+      console.info(
+        `[LivingFrame] Family Mode blocked a "${blockedSegment.category}" segment`,
+      );
+      pausedByProtectionRef.current = true;
+      handlePause();
+    }
+  }, [isProtectionBlocked, blockedSegment, currentTimeSec, seekRelative, handlePause]);
+
+  // Resume automatically once the room is clear again (only if we were the ones pausing).
+  useEffect(() => {
+    if (!isProtectionBlocked && pausedByProtectionRef.current) {
+      pausedByProtectionRef.current = false;
+      handlePlay();
+    }
+  }, [isProtectionBlocked, handlePlay]);
+
   // React to room sensor gestures: hand raise toggles playback, swipes seek +/- 5s
   useEffect(() => {
     const event = roomState.lastEvent;
@@ -602,6 +692,18 @@ export const VideoPlayerView = ({
         </View>
       )}
 
+      {/* Subtle room-event notice (Family Mode reaction) */}
+      {roomNotice && (
+        <View
+          style={styles.roomNoticeWrapper}
+          pointerEvents="none"
+          testID="room-notice">
+          <View style={styles.roomNoticePill}>
+            <Text style={styles.roomNoticeText}>{roomNotice}</Text>
+          </View>
+        </View>
+      )}
+
       {/* 4. Controls & HUD Overlays (disappear after 5s or on tap to view video full screen) */}
       {controlsVisible && (
         <>
@@ -694,6 +796,35 @@ export const VideoPlayerView = ({
                   {roomState.visionEnabled ? 'GESTURES ON' : 'GESTURES OFF'}
                 </Text>
               </Pressable>
+
+              {/* Family Mode: room-aware protection (explicit viewer opt-in) */}
+              <Pressable
+                style={[
+                  styles.visionToggle,
+                  roomState.familyModeEnabled && styles.familyToggleOn,
+                  focusedControl === 'family' && styles.visionToggleFocused,
+                ]}
+                onFocus={() => {
+                  resetHideTimer();
+                  setFocusedControl('family');
+                }}
+                onPress={() => setFamilyMode(!roomState.familyModeEnabled)}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  roomState.familyModeEnabled
+                    ? 'Turn off Family Mode'
+                    : 'Turn on Family Mode'
+                }
+                testID="btn-player-family-toggle">
+                <Text style={styles.visionToggleIcon}>👨‍👩‍👧</Text>
+                <Text
+                  style={[
+                    styles.visionToggleText,
+                    roomState.familyModeEnabled && styles.familyToggleTextOn,
+                  ]}>
+                  {roomState.familyModeEnabled ? 'FAMILY ON' : 'FAMILY OFF'}
+                </Text>
+              </Pressable>
             </TVFocusGuideView>
           </View>
 
@@ -783,6 +914,34 @@ export const VideoPlayerView = ({
           </View>
         </>
       )}
+
+      {/* Family Mode protection: opaque cover + explanation over the real video */}
+      {isProtectionBlocked && blockedSegment && (
+        <View style={styles.protectionOverlay} testID="family-protection-overlay">
+          <View style={styles.protectionCard}>
+            <Text style={styles.protectionBadge}>FAMILY MODE</Text>
+            <Text style={styles.protectionTitle}>Playback paused</Text>
+            <Text style={styles.protectionText}>
+              Someone joined the room during a scene tagged for{' '}
+              {blockedSegment.category.replace('_', ' ')}. This segment is not
+              family-safe.
+            </Text>
+            <Text style={styles.protectionHint}>
+              Playback resumes automatically when the room clears.
+            </Text>
+            <TVFocusGuideView style={styles.protectionActions}>
+              <Pressable
+                style={styles.protectionResumeBtn}
+                onPress={() => setProtectionOverride(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Resume anyway"
+                testID="btn-protection-resume">
+                <Text style={styles.protectionResumeText}>▶  Resume anyway</Text>
+              </Pressable>
+            </TVFocusGuideView>
+          </View>
+        </View>
+      )}
     </View>
   );
 };
@@ -844,6 +1003,83 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: '800',
     letterSpacing: 2,
+  },
+  roomNoticeWrapper: {
+    position: 'absolute',
+    top: 96,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 40,
+  },
+  roomNoticePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.45)',
+  },
+  roomNoticeText: {
+    color: '#E0F2FE',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+  protectionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 200,
+  },
+  protectionCard: {
+    width: 760,
+    backgroundColor: 'rgba(15, 23, 42, 0.98)',
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: 'rgba(245, 158, 11, 0.6)',
+    padding: 36,
+  },
+  protectionBadge: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 2,
+    color: '#F59E0B',
+    marginBottom: 10,
+  },
+  protectionTitle: {
+    fontSize: 30,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 12,
+  },
+  protectionText: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#CBD5E1',
+    marginBottom: 10,
+  },
+  protectionHint: {
+    fontSize: 13,
+    color: '#94A3B8',
+    marginBottom: 22,
+  },
+  protectionActions: {
+    flexDirection: 'row',
+  },
+  protectionResumeBtn: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  protectionResumeText: {
+    color: '#0F172A',
+    fontSize: 15,
+    fontWeight: '800',
   },
   topVignette: {
     position: 'absolute',
@@ -1010,6 +1246,13 @@ const styles = StyleSheet.create({
   },
   visionToggleTextOn: {
     color: '#6EE7B7',
+  },
+  familyToggleOn: {
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    borderColor: 'rgba(245, 158, 11, 0.6)',
+  },
+  familyToggleTextOn: {
+    color: '#FDE68A',
   },
   bottomControls: {
     position: 'absolute',
