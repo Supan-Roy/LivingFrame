@@ -876,7 +876,9 @@ export const VideoPlayerView = ({
         if (action.type === 'START_RECAP') {
           handlePolicyAction(action);
         } else {
-          showGestureFeedback('Vote Recorded');
+          showGestureFeedback(
+            `Vote: ${engine.recapOffer?.currentVotes || 1}/${engine.recapOffer?.eligibleViewers || 2} 👍`,
+          );
           if (engine.recapOffer) {
             setRecapOffer({...engine.recapOffer});
           }
@@ -1503,16 +1505,47 @@ export const VideoPlayerView = ({
             {(recapOffer.missedProgress * 100).toFixed(0)}% of content) • Movie keeps playing
           </Text>
 
-          {recapOffer.requiredVotes > 1 && (
-            <View style={styles.recapVoteRow}>
+          {/* Real-time voting stat card whenever recap offer is present */}
+          <View style={styles.recapVoteRow} testID="recap-vote-stat-card">
+            <View style={styles.recapVoteHeader}>
+              <View style={styles.recapVoteHeaderLeft}>
+                <Icon name="spark" size={11} color="#F59E0B" />
+                <Text style={styles.recapVoteHeaderTitle}>CONSENSUS VOTE</Text>
+              </View>
+              <View style={styles.recapVoteLiveBadge}>
+                <View style={styles.recapVoteLiveDot} />
+                <Text style={styles.recapVoteLiveText}>LIVE</Text>
+              </View>
+            </View>
+
+            <View style={styles.recapVoteStatsRow}>
               <Text style={styles.recapVoteCount}>
                 Consensus: {recapOffer.currentVotes} / {recapOffer.requiredVotes} votes
               </Text>
-              <Text style={styles.recapVoteHint}>
-                Thumbs-up or Remote to vote
+              <Text style={styles.recapVoteFraction}>
+                {recapOffer.currentVotes}/{recapOffer.eligibleViewers}
               </Text>
             </View>
-          )}
+
+            {/* Visual vote progress bar */}
+            <View style={styles.recapVoteBarTrack}>
+              <View
+                style={[
+                  styles.recapVoteBarFill,
+                  {
+                    width: `${Math.min(
+                      100,
+                      (recapOffer.currentVotes / Math.max(1, recapOffer.eligibleViewers)) * 100,
+                    )}%`,
+                  },
+                ]}
+              />
+            </View>
+
+            <Text style={styles.recapVoteHint}>
+              Thumbs-up 👍 gesture or Remote to cast vote
+            </Text>
+          </View>
 
           <TVFocusGuideView style={styles.recapOfferActionRow}>
             <Pressable
@@ -2229,19 +2262,80 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   recapVoteRow: {
-    backgroundColor: 'rgba(30, 41, 59, 0.7)',
-    borderRadius: 8,
+    backgroundColor: 'rgba(30, 41, 59, 0.85)',
+    borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(0, 229, 255, 0.25)',
+  },
+  recapVoteHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  recapVoteHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  recapVoteHeaderTitle: {
+    color: '#F59E0B',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  recapVoteLiveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    gap: 4,
+  },
+  recapVoteLiveDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#EF4444',
+  },
+  recapVoteLiveText: {
+    color: '#EF4444',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  recapVoteStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
   },
   recapVoteCount: {
     color: '#FDE68A',
     fontSize: 12,
     fontWeight: '700',
-    marginBottom: 2,
+  },
+  recapVoteFraction: {
+    color: '#00E5FF',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  recapVoteBarTrack: {
+    height: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 6,
+  },
+  recapVoteBarFill: {
+    height: '100%',
+    backgroundColor: '#00E5FF',
+    borderRadius: 3,
   },
   recapVoteHint: {
     color: '#94A3B8',
