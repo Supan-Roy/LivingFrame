@@ -128,12 +128,12 @@ Rather than loading a heavyweight head-pose network, LivingFrame derives orienta
 2. **Ear Occlusion & Back-of-Head Detection**:
    If both ears have visibility $< 0.25$ or shoulder vectors indicate posterior view, the viewer is turned away (`away`).
 3. **3D Depth Differential ($Z$-Axis)**:
-   MediaPipe outputs camera-relative depth ($Z$), where negative values indicate proximity to the lens. When facing the TV, $z_{\text{nose}} < z_{\text{ears}}$. If $z_{\text{nose}} > z_{\text{ears}} + 0.02$, the nose is recessed behind the ear baseline, indicating the head is turned away.
+   MediaPipe outputs camera-relative depth ($Z$), where negative values indicate proximity to the lens. When facing the TV, $z_{\mathrm{nose}} < z_{\mathrm{ears}}$. If $z_{\mathrm{nose}} > z_{\mathrm{ears}} + 0.02$, the nose is recessed behind the ear baseline, indicating the head is turned away.
 4. **Horizontal Yaw Ratio**:
    Measures the lateral offset of the nose relative to the midpoint of the ears:
-   $$\text{yaw\_ratio} = \frac{|x_{\text{nose}} - x_{\text{ear\_mid}}|}{\frac{1}{2} \cdot \text{span}_{\text{ears}}}$$
-   - When facing the TV: $\text{yaw\_ratio} \le 0.65 \implies \text{toward}$ (Attentive).
-   - When rotated $> 45^\circ$ sideways: $\text{yaw\_ratio} > 0.65 \implies \text{away}$ (Distracted).
+   $$\mathrm{YawRatio} = \frac{|x_{\mathrm{nose}} - x_{\mathrm{mid}}|}{\frac{1}{2} \cdot \mathrm{Span}_{\mathrm{ears}}}$$
+   - When facing the TV: $\mathrm{YawRatio} \le 0.65 \implies$ facing toward the TV (Attentive).
+   - When rotated $> 45^\circ$ sideways: $\mathrm{YawRatio} > 0.65 \implies$ turned away from the TV (Distracted).
 
 ---
 
@@ -227,7 +227,7 @@ stateDiagram-v2
 | `START_RECAP` | Consensus reached or remote accepted | `resumePositionSec, metadata` | Pauses main video; displays spoiler-free character/scene recap modal |
 | `PAUSE_ATTENTION` | Inattention $> 70\%$ for $\ge 5.0\text{s}$ | `checkpoint: AttentionDistractionCheckpoint` | Pauses video; renders subtle card with *"Keep Playing 👍"* button |
 | `OVERRIDE_ATTENTION` | Thumbs-up gesture or button click | `resume: true` | Clears pause; unlatches attention lock; resumes playback |
-| `RESUME_ATTENTION` | Viewers face TV again | `autoResume, offerReplay, missedSec` | Resumes playback; renders optional bottom rewind banner if $\text{missedSec} \ge 4.0\text{s}$ |
+| `RESUME_ATTENTION` | Viewers face TV again | `autoResume, offerReplay, missedSec` | Resumes playback; renders optional bottom rewind banner if missed content $\ge 4.0\text{ s}$ |
 
 ---
 

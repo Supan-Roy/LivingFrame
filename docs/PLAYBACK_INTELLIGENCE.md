@@ -80,17 +80,17 @@ When multiple people watch together:
      ```
 2. **Eligibility Evaluation on Return ($N-1 \to N$)**:
    - When the departed viewer returns, the engine calculates missed progress:
-     $$\Delta t = t_{\text{return}} - t_{\text{departure}}$$
-     $$\text{missed\_progress} = \frac{\Delta t}{\text{durationSec}}$$
+     $$\Delta t = t_{\mathrm{return}} - t_{\mathrm{departure}}$$
+     $$P_{\mathrm{missed}} = \frac{\Delta t}{\mathrm{DurationSec}}$$
    - A recap offer is warranted if:
-     $$\text{missed\_progress} \ge 0.05 \quad (5\%) \quad \text{or} \quad \Delta t \ge 15.0\text{s}$$
+     $$P_{\mathrm{missed}} \ge 0.05 \quad (5\%) \quad \text{or} \quad \Delta t \ge 15.0\text{ s}$$
 3. **Non-Blocking Recap Banner**:
    - An unobtrusive notification banner appears at the bottom of the screen: *"SOMEONE'S BACK · Catch them up?"*
    - Playback continues seamlessly in the background while the offer is active.
 4. **Consensus Voting Engine**:
    - In shared sessions, a recap should not disrupt the group unless the audience agrees.
    - **Required Votes**:
-     $$\text{requiredVotes} = \left\lceil \frac{N}{2} \right\rceil$$
+     $$\mathrm{RequiredVotes} = \left\lceil \frac{N}{2} \right\rceil$$
    - **Voting Channels**:
      - **Remote Control**: Selecting "Show Recap" counts as instant host approval, immediately opening the recap.
      - **Natural Gestures**: Any viewer presenting a `thumbs_up` gesture increments the vote tally ($1/2$, $2/3$) with a $2.0\text{s}$ anti-repetition cooldown.
@@ -104,8 +104,8 @@ When multiple people watch together:
 Perceives whether viewers are actively engaged with the television screen:
 1. **Inattention Evaluation**:
    - The engine monitors the ratio of turned-away viewers:
-     $$R_{\text{inattentive}} = \frac{N_{\text{distracted}}}{N_{\text{totalViewers}}}$$
-   - When $R_{\text{inattentive}} > 0.70$ ($70\%$), an inattention timer initiates.
+     $$R_{\mathrm{inattentive}} = \frac{N_{\mathrm{distracted}}}{N_{\mathrm{totalViewers}}}$$
+   - When $R_{\mathrm{inattentive}} > 0.70$ ($70\%$), an inattention timer initiates.
 2. **Sustained Inattention Pause**:
    - If the inattentive state persists continuously for **$5.0\text{s}$**, playback pauses gently.
    - A subtle prompt card slides into view:

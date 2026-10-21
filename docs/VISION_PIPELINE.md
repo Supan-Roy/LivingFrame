@@ -76,19 +76,19 @@ or if shoulder vectors indicate the viewer's back is turned toward the camera, t
 #### Step 2: 3D Depth Differential ($Z$-Axis)
 MediaPipe produces metric depth values centered at the subject's hip plane, where negative $Z$ indicates proximity to the camera.
 When facing forward, the tip of the nose is situated anterior to the ears:
-$$\bar{z}_{\text{ears}} = \frac{z_7 + z_8}{2}$$
-$$\Delta z = z_0 - \bar{z}_{\text{ears}}$$
-- If $\Delta z > +0.02$, the nose is positioned behind the ear baseline $\implies \text{Head is turned away} \implies \text{`away`}$.
+$$\bar{z}_{\mathrm{ears}} = \frac{z_7 + z_8}{2}$$
+$$\Delta z = z_0 - \bar{z}_{\mathrm{ears}}$$
+- If $\Delta z > +0.02$, the nose is positioned behind the ear baseline $\implies$ Head is turned away (`away`).
 
 #### Step 3: Normalized Horizontal Yaw Ratio
 Calculates the horizontal displacement of the nose relative to the midpoint of the ears, normalized by half the ear span:
-$$\text{span}_{\text{ears}} = |x_7 - x_8|$$
-$$x_{\text{mid}} = \frac{x_7 + x_8}{2}$$
-$$\text{yaw\_ratio} = \frac{|x_0 - x_{\text{mid}}|}{\frac{1}{2} \cdot \text{span}_{\text{ears}}}$$
+$$\mathrm{Span}_{\mathrm{ears}} = |x_7 - x_8|$$
+$$x_{\mathrm{mid}} = \frac{x_7 + x_8}{2}$$
+$$\mathrm{YawRatio} = \frac{|x_0 - x_{\mathrm{mid}}|}{\frac{1}{2} \cdot \mathrm{Span}_{\mathrm{ears}}}$$
 
 **Classification Criteria:**
-- $\text{yaw\_ratio} \le 0.65 \implies$ Viewer is oriented **toward** the television (`toward`).
-- $\text{yaw\_ratio} > 0.65 \implies$ Head is turned sideways $> 45^\circ \implies$ Viewer is oriented **away** (`away`).
+- $\mathrm{YawRatio} \le 0.65 \implies$ Viewer is oriented **toward** the television (`toward`).
+- $\mathrm{YawRatio} > 0.65 \implies$ Head is turned sideways $> 45^\circ \implies$ Viewer is oriented **away** (`away`).
 
 ---
 
@@ -99,22 +99,22 @@ Raw frame detections are subject to sensor noise, motion blur, and ambient illum
 ### A. Presence Stabilization (`PresenceStabilizer`)
 - **Sliding History Window**: Maintains a ring buffer of the last $W = 5$ frames.
 - **Majority Vote**:
-  $$\text{stable\_count} = \operatorname{mode}(\{c_1, c_2, \dots, c_W\})$$
+  $$\mathrm{StableCount} = \operatorname{mode}(\{c_1, c_2, \dots, c_W\})$$
 - **Hysteresis Cooldown**: Enforces a $1.5\text{s}$ minimum lockout period following an occupancy shift to prevent rapid oscillation when a person enters or leaves the boundary of the frame.
 
 ### B. Child Presence Decider (`ChildPresenceDecider`)
 - **Softmax Probability Aggregation**: Gathers confidence values across child brackets `(0-2)`, `(4-6)`, and `(8-12)`:
-  $$P_{\text{child}} = \sum_{b \in \{\text{0-2}, \text{4-6}, \text{8-12}\}} P(b)$$
+  $$P_{\mathrm{child}} = \sum_{b \in \{\text{0-2}, \text{4-6}, \text{8-12}\}} P(b)$$
 - **Median Filter**: Computes the median over a history window of $7$ frames to eliminate transient classification spikes.
 - **Dual-Threshold Hysteresis**:
-  - Arming Threshold: $P_{\text{child}} \ge 0.55$ to trigger child protection.
-  - Disarming Threshold: $P_{\text{child}} \le 0.35$ to clear child protection.
+  - Arming Threshold: $P_{\mathrm{child}} \ge 0.55$ to trigger child protection.
+  - Disarming Threshold: $P_{\mathrm{child}} \le 0.35$ to clear child protection.
 - **Sustained Confirmation**: Requires $3$ consecutive confirmed samples before altering room protection states.
 
 ### C. Attention Tracking Filter (`AttentionTracker`)
 - **Inattention Ratio**:
-  $$R_{\text{inattentive}} = \frac{N_{\text{distracted}}}{N_{\text{totalViewers}}}$$
-- **Threshold**: Sustained distraction is registered when $R_{\text{inattentive}} > 0.70$ ($70\%$).
+  $$R_{\mathrm{inattentive}} = \frac{N_{\mathrm{distracted}}}{N_{\mathrm{totalViewers}}}$$
+- **Threshold**: Sustained distraction is registered when $R_{\mathrm{inattentive}} > 0.70$ ($70\%$).
 - **Confirmation Latch**: Enforces a 3-frame confirmation window before transmitting an attention state change to the WebSocket server.
 
 ---
