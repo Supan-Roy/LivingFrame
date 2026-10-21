@@ -302,6 +302,75 @@ sensor._detect_swipe(FakeHandResults(0.7, 0.5), 6.0)
 swipe_res = sensor._detect_swipe(FakeHandResults(0.3, 0.5), 6.15)
 check("horizontal left produces swipe_left", swipe_res, 'swipe_left')
 
+print("\n== Phase 2: estimate_pose_orientation ==")
+
+def make_face_pose(nose_x=0.5, nose_y=0.2, nose_z=-0.1, nose_v=1.0,
+                   l_ear_x=0.4, l_ear_y=0.2, l_ear_z=0.0, l_ear_v=1.0,
+                   r_ear_x=0.6, r_ear_y=0.2, r_ear_z=0.0, r_ear_v=1.0,
+                   l_eye_v=1.0, r_eye_v=1.0):
+    lms = [FakeLandmark(0.5, 0.5, 1.0) for _ in range(33)]
+    class ZLandmark:
+        def __init__(self, x, y, z, v):
+            self.x = x
+            self.y = y
+            self.z = z
+            self.visibility = v
+
+    lms[0] = ZLandmark(nose_x, nose_y, nose_z, nose_v)
+    lms[2] = ZLandmark(0.45, 0.18, nose_z, l_eye_v)
+    lms[5] = ZLandmark(0.55, 0.18, nose_z, r_eye_v)
+    lms[7] = ZLandmark(l_ear_x, l_ear_y, l_ear_z, l_ear_v)
+    lms[8] = ZLandmark(r_ear_x, r_ear_y, r_ear_z, r_ear_v)
+    return lms
+
+# 1. Forward facing viewer
+fwd_pose = make_face_pose(nose_x=0.5, l_ear_x=0.4, r_ear_x=0.6)
+res = w.estimate_pose_orientation(fwd_pose)
+check("forward facing pose is estimated as toward", res['facing'], 'toward')
+
+# 2. Turned sideways (yaw_ratio > 0.65)
+# ear_span = 0.2, half_span = 0.1. ear_mid = 0.5. nose_x = 0.58 -> offset = 0.08 / 0.1 = 0.8 > 0.65
+side_pose = make_face_pose(nose_x=0.58, l_ear_x=0.4, r_ear_x=0.6)
+res = w.estimate_pose_orientation(side_pose)
+check("sideways turned pose is estimated as away", res['facing'], 'away')
+
+# 3. Back of head (facial landmarks not visible)
+back_pose = make_face_pose(nose_v=0.1, l_eye_v=0.1, r_eye_v=0.1)
+res = w.estimate_pose_orientation(back_pose)
+check("back of head pose is estimated as away", res['facing'], 'away')
+
+# 4. Nose behind ears in 3D
+rev_pose = make_face_pose(nose_z=0.20, l_ear_z=0.0, r_ear_z=0.0)
+res = w.estimate_pose_orientation(rev_pose)
+check("nose behind ears is estimated as away", res['facing'], 'away')
+
+print("\n== Phase 2: AttentionTracker (70% threshold & hysteresis) ==")
+att_tracker = w.AttentionTracker(inattention_threshold=0.70, confirm_samples=3)
+
+# 1 viewer, attentive
+att_tracker.update([{'facing': 'toward'}], total_people=1)
+check("single attentive viewer is not distracted", att_tracker.is_distracted, False)
+
+# 1 viewer, turned away: takes 3 samples to confirm distraction
+att_tracker.update([{'facing': 'away'}], total_people=1)
+check("1st distracted sample pending", att_tracker.is_distracted, False)
+att_tracker.update([{'facing': 'away'}], total_people=1)
+check("2nd distracted sample pending", att_tracker.is_distracted, False)
+is_dist, att, dist, tot, changed = att_tracker.update([{'facing': 'away'}], total_people=1)
+check("3rd sample confirms distraction for 1 viewer (100% > 70%)", is_dist, True)
+check("attention state_changed flag is True", changed, True)
+
+# 2 viewers, 1 attentive, 1 turned away -> 50% <= 70% -> not distracted
+att_tracker.reset()
+for _ in range(3):
+    att_tracker.update([{'facing': 'toward'}, {'facing': 'away'}], total_people=2)
+check("2 viewers with 1 attentive is NOT distracted (50% <= 70%)", att_tracker.is_distracted, False)
+
+# 2 viewers, both turned away -> 100% > 70% -> distracted
+for _ in range(3):
+    is_dist, att, dist, tot, changed = att_tracker.update([{'facing': 'away'}, {'facing': 'away'}], total_people=2)
+check("2 viewers with both turned away IS distracted (100% > 70%)", is_dist, True)
+
 total = len(RESULTS)
 passed = sum(RESULTS)
 print(f"\n{passed}/{total} passed")

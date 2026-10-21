@@ -52,6 +52,25 @@ export interface PlaybackIntelligenceConfig {
    * from rapidly triggering repeated votes across successive frames.
    */
   voteCooldownMs: number;
+
+  /**
+   * Fraction of detected viewers turned away to trigger the inattention state.
+   * Rule: strictly greater than 70% (e.g. 1/1 = 100%, 2/2 = 100%, 3/4 = 75%).
+   */
+  attentionInattentiveThreshold: number;
+
+  /**
+   * Sustained duration in seconds before inattention pauses playback.
+   * Provisional value: 5.0 (5 seconds).
+   * Rationale: Prevents pausing on brief natural glances away (e.g. checking a phone or drinking water).
+   */
+  attentionSustainedPeriodSec: number;
+
+  /**
+   * Minimum playback seconds elapsed during inattention to warrant a replay/recap offer upon return.
+   * Provisional value: 4.0 (4 seconds).
+   */
+  minAttentionMissedSec: number;
 }
 
 export const DEFAULT_PLAYBACK_INTELLIGENCE_CONFIG: PlaybackIntelligenceConfig = {
@@ -61,6 +80,9 @@ export const DEFAULT_PLAYBACK_INTELLIGENCE_CONFIG: PlaybackIntelligenceConfig = 
   emptyRoomGracePeriodMs: 2500,
   recapOfferTimeoutSec: 12,
   voteCooldownMs: 2000,
+  attentionInattentiveThreshold: 0.70,
+  attentionSustainedPeriodSec: 5.0,
+  minAttentionMissedSec: 4.0,
 };
 
 /**
@@ -70,6 +92,28 @@ export interface SoloPauseCheckpoint {
   titleId: string;
   playbackPositionSec: number;
   pausedAtMs: number;
+}
+
+/**
+ * Saved state when viewers are turned away from the TV for a sustained period.
+ */
+export interface AttentionDistractionCheckpoint {
+  titleId: string;
+  startPositionSec: number;
+  pausedPositionSec: number;
+  pausedAtMs: number;
+}
+
+/**
+ * State for optional replay / recap offer after viewers return attention to the TV.
+ */
+export interface AttentionReplayOfferState {
+  titleId: string;
+  missedSec: number;
+  replayPositionSec: number;
+  offeredAtMs: number;
+  expiresAtMs: number;
+  metadata?: TitleRecapMetadata;
 }
 
 /**
@@ -121,4 +165,7 @@ export type PlaybackPolicyAction =
   | { type: 'RECORD_SHARED_DEPARTURE'; checkpoint: SharedDepartureCheckpoint }
   | { type: 'OFFER_RECAP'; offer: RecapOfferState }
   | { type: 'DISMISS_RECAP'; reason: 'manual' | 'timeout' }
-  | { type: 'START_RECAP'; resumePositionSec: number; metadata?: TitleRecapMetadata };
+  | { type: 'START_RECAP'; resumePositionSec: number; metadata?: TitleRecapMetadata }
+  | { type: 'PAUSE_ATTENTION'; reason: 'viewers_distracted'; checkpoint: AttentionDistractionCheckpoint }
+  | { type: 'RESUME_ATTENTION'; autoResume: boolean; offerReplay: boolean; missedSec: number; replayPositionSec: number }
+  | { type: 'OVERRIDE_ATTENTION'; resume: boolean };

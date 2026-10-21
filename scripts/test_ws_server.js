@@ -281,6 +281,9 @@ const server = http.createServer((req, res) => {
           fps: parseFloat(req.headers['x-fps']) || 0,
           personCount: parseInt(req.headers['x-person-count'], 10) || 0,
           childPresent: req.headers['x-child-present'] === '1',
+          attentiveCount: parseInt(req.headers['x-attentive-count'], 10) || 0,
+          distractedCount: parseInt(req.headers['x-distracted-count'], 10) || 0,
+          isDistracted: req.headers['x-is-distracted'] === '1',
           timestamp: Date.now(),
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -546,24 +549,30 @@ const server = http.createServer((req, res) => {
         <span class="metric-label">PEOPLE IN VIEW</span>
         <span id="metric-people" class="metric-val cyan">0</span>
       </div>
+      <div class="metric">
+        <span class="metric-label">VIEWER ATTENTION</span>
+        <span id="metric-attention" class="metric-val green">Facing TV</span>
+      </div>
     </div>
   </div>
 
   <div class="room-log">
-    <div class="room-log-title">ROOM EVENTS (person_entered / person_left)</div>
+    <div class="room-log-title">ROOM EVENTS (person_entered / person_left / attention)</div>
     <div id="room-log-list" class="room-log-list">No room events yet.</div>
   </div>
 
   <div class="footer">
     <span>Privacy Mode: 100% Local Inference (Zero cloud streaming)</span>
-    <div style="display: flex; gap: 8px;">
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
       <button class="btn-manual" onclick="fetch('/gesture/hand_raised').then(r=>r.json()).then(d=>console.log(d))">Hand Raised</button>
       <button class="btn-manual" onclick="fetch('/gesture/swipe_left').then(r=>r.json()).then(d=>console.log(d))">Swipe Left</button>
       <button class="btn-manual" onclick="fetch('/gesture/swipe_right').then(r=>r.json()).then(d=>console.log(d))">Swipe Right</button>
-      <button class="btn-manual" onclick="fetch('/gesture/thumbs_up').then(r=>r.json()).then(d=>console.log(d))">Thumbs Up</button>
+      <button class="btn-manual" onclick="fetch('/gesture/thumbs_up').then(r=>r.json()).then(d=>console.log(d))">Thumbs Up 👍</button>
       <button class="btn-manual" onclick="fetch('/gesture/closed_fist').then(r=>r.json()).then(d=>console.log(d))">Closed Fist</button>
       <button class="btn-manual" onclick="fetch('/room/person_entered').then(r=>r.json()).then(d=>console.log(d))">Person Entered</button>
       <button class="btn-manual" onclick="fetch('/room/person_left').then(r=>r.json()).then(d=>console.log(d))">Person Left</button>
+      <button class="btn-manual" style="border-color:#F59E0B;color:#FDE68A;" onclick="fetch('/room/attention?distracted=1&attentive=0').then(r=>r.json()).then(d=>console.log(d))">Turned Away (100%)</button>
+      <button class="btn-manual" style="border-color:#10B981;color:#6EE7B7;" onclick="fetch('/room/attention?distracted=0&attentive=1').then(r=>r.json()).then(d=>console.log(d))">Facing TV (100%)</button>
     </div>
   </div>
 
@@ -575,6 +584,7 @@ const server = http.createServer((req, res) => {
     const metricConf = document.getElementById('metric-conf');
     const metricFps = document.getElementById('metric-fps');
     const metricPeople = document.getElementById('metric-people');
+    const metricAttention = document.getElementById('metric-attention');
     const roomLogList = document.getElementById('room-log-list');
     let alertTimer = null;
 
@@ -592,6 +602,19 @@ const server = http.createServer((req, res) => {
         metricEngine.innerText = (data.engine === 'mediapipe' ? 'MediaPipe ML' : 'Heuristic');
         metricFps.innerText = (data.fps || 10).toFixed(1) + ' fps';
         metricPeople.innerText = String(data.personCount || 0) + (data.childPresent ? ' (Child Detected)' : '');
+
+        if (data.personCount > 0) {
+          if (data.isDistracted) {
+            metricAttention.innerText = 'Turned Away (' + (data.distractedCount || 0) + '/' + data.personCount + ')';
+            metricAttention.className = 'metric-val gold';
+          } else {
+            metricAttention.innerText = 'Facing TV (' + (data.attentiveCount || 0) + '/' + data.personCount + ')';
+            metricAttention.className = 'metric-val green';
+          }
+        } else {
+          metricAttention.innerText = 'No Viewers';
+          metricAttention.className = 'metric-val';
+        }
 
         if (data.activeGesture && data.activeGesture !== 'None') {
           const label = data.activeGesture.replace(/_/g, ' ').toUpperCase();
@@ -694,6 +717,39 @@ const server = http.createServer((req, res) => {
       console.log(`[ROOM] Family mode set to ${enabled} -> ${notified} client(s)`);
       res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
       res.end(JSON.stringify({ status: 'event_dispatched', familyModeEnabled: enabled, clientsNotified: notified }));
+      return;
+    }
+
+    if (url.startsWith('/room/attention')) {
+      const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      const attentive = parseInt(parsedUrl.searchParams.get('attentive'), 10) || 0;
+      const distracted = parseInt(parsedUrl.searchParams.get('distracted'), 10) || 0;
+      const total = attentive + distracted;
+      const isDistracted = parsedUrl.searchParams.has('isDistracted')
+        ? parsedUrl.searchParams.get('isDistracted') === '1'
+        : (total > 0 && (distracted / total) > 0.70);
+      const manualPayload = {
+        type: 'attention_state',
+        source: 'manual',
+        message: isDistracted
+          ? `Viewers turned away (${distracted}/${total}) · Inattentive > 70%`
+          : `Viewers facing TV (${attentive}/${total}) · Attentive`,
+        payload: {
+          attentiveCount: attentive,
+          distractedCount: distracted,
+          isDistracted,
+          inattentiveRatio: total > 0 ? (distracted / total) : 0,
+          viewerCount: total,
+        },
+        timestamp: Date.now(),
+      };
+      recordRoomEvent(manualPayload);
+      const notified = broadcast(manualPayload);
+      console.log(
+        `[ATTENTION] Manual attention event (attentive=${attentive}, distracted=${distracted}, isDistracted=${isDistracted}) -> ${notified} client(s)`
+      );
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ status: 'event_dispatched', source: 'manual', clientsNotified: notified, event: manualPayload }));
       return;
     }
   }

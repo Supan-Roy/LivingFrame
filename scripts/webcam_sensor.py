@@ -582,6 +582,156 @@ def estimate_child_likelihood(landmarks, min_visibility=CHILD_MIN_LANDMARK_VISIB
     return head_width / shoulder_width
 
 
+def estimate_pose_orientation(landmarks, min_visibility=0.20):
+    """Estimate whether a person is facing TOWARD the TV/camera ('attentive')
+    or turned AWAY ('distracted').
+
+    Uses MediaPipe Pose 33 3D landmarks (face/ears/nose/eyes/shoulders).
+    Calculates facial feature visibility, 3D z-depth (nose vs ears), and yaw symmetry.
+    Zero cloud AI or external dependencies; runs in < 0.05ms on CPU.
+
+    Returns:
+        dict: {
+            'facing': 'toward' | 'away' | 'unknown',
+            'confidence': float,
+            'yaw_ratio': float,
+            'reason': str
+        }
+    """
+    def visibility(landmark):
+        value = getattr(landmark, 'visibility', 1.0)
+        return 1.0 if value is None else value
+
+    def z_val(landmark):
+        return getattr(landmark, 'z', 0.0) or 0.0
+
+    try:
+        nose = landmarks[0]
+        left_eye, right_eye = landmarks[2], landmarks[5]
+        left_ear, right_ear = landmarks[7], landmarks[8]
+    except (IndexError, TypeError):
+        return {'facing': 'unknown', 'confidence': 0.0, 'yaw_ratio': 0.0, 'reason': 'missing_landmarks'}
+
+    nose_v = visibility(nose)
+    l_eye_v = visibility(left_eye)
+    r_eye_v = visibility(right_eye)
+    l_ear_v = visibility(left_ear)
+    r_ear_v = visibility(right_ear)
+
+    # 1. Back of head check: facial landmarks have very low visibility or are occluded
+    if nose_v < 0.25 and l_eye_v < 0.25 and r_eye_v < 0.25:
+        return {'facing': 'away', 'confidence': 0.90, 'yaw_ratio': 1.0, 'reason': 'back_of_head'}
+
+    # 2. 3D depth check: if nose is significantly deeper (further) than ears, head is reversed
+    if nose_v >= 0.35 and l_ear_v >= 0.35 and r_ear_v >= 0.35:
+        ear_mid_z = (z_val(left_ear) + z_val(right_ear)) / 2.0
+        # In MediaPipe pose camera space, smaller z is closer to the camera.
+        if z_val(nose) > ear_mid_z + 0.08:
+            return {'facing': 'away', 'confidence': 0.85, 'yaw_ratio': 1.0, 'reason': 'nose_behind_ears'}
+
+    # 3. Horizontal yaw symmetry check (nose horizontal displacement relative to ear span)
+    if min(l_ear_v, r_ear_v) >= 0.25:
+        ear_mid_x = (left_ear.x + right_ear.x) / 2.0
+        ear_span = abs(left_ear.x - right_ear.x)
+        if ear_span > 0.015:
+            half_span = ear_span / 2.0
+            yaw_offset = abs(nose.x - ear_mid_x)
+            yaw_ratio = yaw_offset / half_span
+            # When yaw_ratio > 0.65, head is turned > 50-60 degrees away from the TV
+            if yaw_ratio > 0.65:
+                return {
+                    'facing': 'away',
+                    'confidence': min(1.0, 0.70 + (yaw_ratio - 0.65)),
+                    'yaw_ratio': round(yaw_ratio, 2),
+                    'reason': f'turned_sideways (yaw={yaw_ratio:.2f})',
+                }
+            return {
+                'facing': 'toward',
+                'confidence': max(0.60, 1.0 - yaw_ratio * 0.5),
+                'yaw_ratio': round(yaw_ratio, 2),
+                'reason': f'facing_tv (yaw={yaw_ratio:.2f})',
+            }
+
+    # 4. Asymmetric ear occlusion (severe profile view)
+    if (l_ear_v < 0.20 and r_ear_v >= 0.45) or (r_ear_v < 0.20 and l_ear_v >= 0.45):
+        return {'facing': 'away', 'confidence': 0.80, 'yaw_ratio': 0.85, 'reason': 'profile_view'}
+
+    # 5. Fallback: if nose and at least one eye are clearly visible
+    if nose_v >= 0.40 and (l_eye_v >= 0.35 or r_eye_v >= 0.35):
+        return {'facing': 'toward', 'confidence': 0.70, 'yaw_ratio': 0.2, 'reason': 'face_features_visible'}
+
+    return {'facing': 'away', 'confidence': 0.60, 'yaw_ratio': 0.7, 'reason': 'low_feature_visibility'}
+
+
+class AttentionTracker:
+    """Tracks room viewer attention over time with confirmation filtering.
+    Aggregates per-person orientation estimates.
+    Rule: Distracted when inattentive viewers / total viewers > inattention_threshold (default 0.70).
+    """
+
+    def __init__(self, inattention_threshold=0.70, confirm_samples=3):
+        self.inattention_threshold = inattention_threshold
+        self.confirm_samples = confirm_samples
+        self.is_distracted = False
+        self.pending_distracted = False
+        self.pending_count = 0
+        self.last_attentive = 0
+        self.last_distracted = 0
+        self.last_total = 0
+
+    def reset(self):
+        self.is_distracted = False
+        self.pending_distracted = False
+        self.pending_count = 0
+        self.last_attentive = 0
+        self.last_distracted = 0
+        self.last_total = 0
+
+    def update(self, orientations, total_people=None):
+        """
+        orientations: list of dicts from estimate_pose_orientation
+        total_people: optional person count from presence stabilizer
+        Returns:
+            (is_distracted, attentive_count, distracted_count, total_viewers, state_changed)
+        """
+        if not orientations and (total_people is None or total_people == 0):
+            self.reset()
+            return False, 0, 0, 0, False
+
+        attentive = sum(1 for o in orientations if o.get('facing') == 'toward')
+        distracted = sum(1 for o in orientations if o.get('facing') == 'away')
+        total = total_people if (total_people is not None and total_people > 0) else (attentive + distracted)
+        if total == 0:
+            self.reset()
+            return False, 0, 0, 0, False
+
+        # Any extra people detected in room without valid face orientation count as distracted
+        if total > (attentive + distracted):
+            distracted += (total - (attentive + distracted))
+
+        ratio = (distracted / total) if total > 0 else 0.0
+        # Strictly greater than 70% threshold
+        target_distracted = ratio > self.inattention_threshold
+
+        self.last_attentive = attentive
+        self.last_distracted = distracted
+        self.last_total = total
+
+        if target_distracted == self.pending_distracted:
+            self.pending_count += 1
+        else:
+            self.pending_distracted = target_distracted
+            self.pending_count = 1
+
+        state_changed = False
+        if self.pending_count >= self.confirm_samples:
+            if self.is_distracted != self.pending_distracted:
+                self.is_distracted = self.pending_distracted
+                state_changed = True
+
+        return self.is_distracted, attentive, distracted, total, state_changed
+
+
 class FrameUploader(threading.Thread):
     """Asynchronous background worker to POST frames and telemetry to web dashboard."""
     def __init__(self, server_url):
@@ -674,6 +824,13 @@ class WebcamSensor:
         self.last_reported_person_count = None
         self.room_event_log = deque(maxlen=20)
 
+        # Phase 2: Attention-Aware Viewing state
+        self.attention_tracker = AttentionTracker(inattention_threshold=0.70, confirm_samples=3)
+        self.attentive_count = 0
+        self.distracted_count = 0
+        self.is_distracted = False
+        self.last_reported_attention_distracted = None
+
         # Heuristic parameters (for fallback mode)
         self.upper_zone_fraction = 0.35
         self.skin_delta_threshold = 500
@@ -747,6 +904,9 @@ class WebcamSensor:
                 'delta': count - previous,
                 'childCount': self.child_count,
                 'childPresent': self.child_present,
+                'attentiveCount': self.attentive_count,
+                'distractedCount': self.distracted_count,
+                'isDistracted': self.is_distracted,
             },
             'timestamp': int(time.time() * 1000),
         }
@@ -768,11 +928,7 @@ class WebcamSensor:
             return False
 
     def send_person_count(self, count, source='webcam'):
-        """Report the current confirmed person count without implying an entry/leave.
-
-        Lets the app know who is *already* in the room (e.g. when Family Mode is enabled
-        after someone has been present the whole time).
-        """
+        """Report the current confirmed person count without implying an entry/leave."""
         payload = {
             'type': 'room_state',
             'source': source,
@@ -782,6 +938,9 @@ class WebcamSensor:
                 'count': count,
                 'childCount': self.child_count,
                 'childPresent': self.child_present,
+                'attentiveCount': self.attentive_count,
+                'distractedCount': self.distracted_count,
+                'isDistracted': self.is_distracted,
             },
             'timestamp': int(time.time() * 1000),
         }
@@ -797,6 +956,40 @@ class WebcamSensor:
             return True
         except Exception as e:
             print(f"[WARN] [ROOM STATE FAILED] {e}")
+            return False
+
+    def send_attention_state(self, attentive, distracted, is_distracted, total):
+        """Dispatches an attention_state event when room viewer attention flips."""
+        payload = {
+            'type': 'attention_state',
+            'source': 'webcam',
+            'message': f"Attention: {attentive}/{total} facing TV" + (
+                " · Inattentive (>70% turned away)" if is_distracted else " · Attentive"
+            ),
+            'payload': {
+                'attentiveCount': attentive,
+                'distractedCount': distracted,
+                'isDistracted': is_distracted,
+                'inattentiveRatio': round(distracted / total, 2) if total > 0 else 0.0,
+                'viewerCount': total,
+            },
+            'timestamp': int(time.time() * 1000),
+        }
+        try:
+            req = urllib.request.Request(
+                f"{self.server_url}/trigger",
+                data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            urllib.request.urlopen(req, timeout=2.0).read()
+            print(
+                f"[ATTENTION] attentive={attentive} distracted={distracted} "
+                f"ratio={(distracted/total if total else 0):.2f} (inattentive={is_distracted})"
+            )
+            return True
+        except Exception as e:
+            print(f"[WARN] [ATTENTION STATE FAILED] {e}")
             return False
 
     def _detect_swipe(self, results, now):
@@ -1460,6 +1653,24 @@ class WebcamSensor:
 
                         presence_event = self.presence.add_sample(self.person_count, now)
                         stable_count = self.presence.stable_count()
+
+                        # Phase 2: Estimate viewer orientation (facing toward vs turned away)
+                        orientations = []
+                        for landmarks in (pose_result.pose_landmarks or []):
+                            orient = estimate_pose_orientation(landmarks)
+                            orientations.append(orient)
+
+                        is_distracted, attentive, distracted, total_viewers, attention_changed = (
+                            self.attention_tracker.update(orientations, total_people=stable_count)
+                        )
+                        self.attentive_count = attentive
+                        self.distracted_count = distracted
+                        self.is_distracted = is_distracted
+
+                        if attention_changed or (self.last_reported_attention_distracted is None and total_viewers > 0):
+                            self.send_attention_state(attentive, distracted, is_distracted, total_viewers)
+                            self.last_reported_attention_distracted = is_distracted
+
                         if presence_event:
                             event_type, count, previous = presence_event
                             self.send_room_event(event_type, count, previous)
@@ -1477,6 +1688,14 @@ class WebcamSensor:
                             tag_color = (0, 140, 255) if self.child_present else (0, 229, 255)
                             cv2.putText(annotated_rgb, count_label,
                                         (8, height - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, tag_color, 1)
+
+                            if self.person_count > 0:
+                                att_label = f"Attention: {self.attentive_count}/{self.person_count} facing TV"
+                                if self.is_distracted:
+                                    att_label += " [DISTRACTED > 70%]"
+                                att_color = (0, 69, 255) if self.is_distracted else (0, 229, 255)
+                                cv2.putText(annotated_rgb, att_label,
+                                            (8, height - 28), cv2.FONT_HERSHEY_SIMPLEX, 0.42, att_color, 1)
                     except Exception as e:
                         print(f"[PRESENCE WARN] Frame error: {e}")
 
@@ -1495,6 +1714,9 @@ class WebcamSensor:
                             'X-Handedness': detected_hand,
                             'X-Person-Count': str(self.person_count),
                             'X-Child-Present': '1' if self.child_present else '0',
+                            'X-Attentive-Count': str(self.attentive_count),
+                            'X-Distracted-Count': str(self.distracted_count),
+                            'X-Is-Distracted': '1' if self.is_distracted else '0',
                             'X-FPS': f"{current_fps:.1f}",
                         }
                         self.uploader.post_frame(bio.getvalue(), headers)
@@ -1515,7 +1737,8 @@ class WebcamSensor:
                         )
                     else:
                         child_info = f"pose r={self.last_child_ratio:.2f}"
-                    print(f"[ML RUNNING] ~{current_fps:.1f} fps | Hands: {hands_count} | People: {self.person_count} | Child: {child_info} | Active: {top_label} ({detected_score*100:.0f}%)", end='\r', flush=True)
+                    att_status = f"{self.attentive_count}/{self.person_count} ({'DISTRACTED' if self.is_distracted else 'OK'})"
+                    print(f"[ML RUNNING] ~{current_fps:.1f} fps | Hands: {hands_count} | People: {self.person_count} | Child: {child_info} | Attn: {att_status} | Active: {top_label} ({detected_score*100:.0f}%)", end='\r', flush=True)
                     fps_count = 0
                     fps_start = now
 

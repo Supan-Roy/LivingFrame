@@ -451,6 +451,187 @@ describe('Room-Aware Playback Intelligence - Pure Policy & Calculations', () => 
         expect(engine.sharedCheckpoint).toBeNull();
         expect(engine.recapOffer).toBeNull();
         expect(engine.soloCheckpoint).toBeNull();
+        expect(engine.attentionPaused).toBe(false);
+        expect(engine.attentionOverride).toBe(false);
+        expect(engine.attentionReplayOffer).toBeNull();
+      });
+    });
+
+    describe('Phase 2: Attention-Aware Viewing', () => {
+      it('calculates inattention ratio and only triggers when strictly > 70% of viewers are turned away', () => {
+        // 2 viewers, 1 turned away = 50% <= 70% (no inattention)
+        const a1 = engine.onAttentionChange({
+          attentiveCount: 1,
+          distractedCount: 1,
+          totalViewers: 2,
+          nowMs: 1000,
+        });
+        expect(a1.type).toBe('NONE');
+        expect(engine.attentionInattentiveSinceMs).toBeNull();
+
+        // 3 viewers, 2 turned away = 66.7% <= 70% (no inattention)
+        const a2 = engine.onAttentionChange({
+          attentiveCount: 1,
+          distractedCount: 2,
+          totalViewers: 3,
+          nowMs: 1000,
+        });
+        expect(a2.type).toBe('NONE');
+        expect(engine.attentionInattentiveSinceMs).toBeNull();
+
+        // 1 viewer, 1 turned away = 100% > 70% (inattention starts!)
+        const a3 = engine.onAttentionChange({
+          attentiveCount: 0,
+          distractedCount: 1,
+          totalViewers: 1,
+          nowMs: 1000,
+        });
+        expect(a3.type).toBe('NONE'); // Not paused immediately; needs sustained period
+        expect(engine.attentionInattentiveSinceMs).toBe(1000);
+      });
+
+      it('pauses playback with PAUSE_ATTENTION only after sustained inattention period (5.0s)', () => {
+        engine.updatePlaybackState({
+          titleId: 'test-movie',
+          durationSec: 100,
+          currentPositionSec: 30,
+          isPlaying: true,
+        });
+
+        // T=10,000ms: inattention starts (1 viewer turned away)
+        engine.onAttentionChange({
+          attentiveCount: 0,
+          distractedCount: 1,
+          totalViewers: 1,
+          nowMs: 10000,
+        });
+        expect(engine.isPlaying).toBe(true);
+        expect(engine.attentionPaused).toBe(false);
+
+        // T=13,000ms: 3s elapsed (< 5s sustained threshold)
+        const midAction = engine.checkGracePeriod(13000);
+        expect(midAction.type).toBe('NONE');
+        expect(engine.attentionPaused).toBe(false);
+
+        // Advance playback
+        engine.currentPositionSec = 35;
+
+        // T=15,000ms: 5s sustained elapsed -> triggers PAUSE_ATTENTION!
+        const pauseAction = engine.checkGracePeriod(15000);
+        expect(pauseAction.type).toBe('PAUSE_ATTENTION');
+        expect(engine.attentionPaused).toBe(true);
+        expect(engine.isPlaying).toBe(false);
+        expect(engine.attentionDistractionCheckpoint).toBeTruthy();
+        expect(engine.attentionDistractionCheckpoint?.pausedPositionSec).toBe(35);
+        expect(engine.attentionDistractionCheckpoint?.startPositionSec).toBe(30);
+      });
+
+      it('allows playback to continue if any viewer gives thumbs-up (attention override)', () => {
+        engine.updatePlaybackState({
+          titleId: 'test-movie',
+          durationSec: 100,
+          currentPositionSec: 35,
+          isPlaying: false,
+        });
+        engine.attentionPaused = true;
+        engine.attentionDistractionCheckpoint = {
+          titleId: 'test-movie',
+          startPositionSec: 30,
+          pausedPositionSec: 35,
+          pausedAtMs: 15000,
+        };
+
+        // Viewer gives thumbs-up gesture
+        const overrideAction = engine.overrideAttention(16000);
+        expect(overrideAction.type).toBe('OVERRIDE_ATTENTION');
+        if (overrideAction.type === 'OVERRIDE_ATTENTION') {
+          expect(overrideAction.resume).toBe(true);
+        }
+        expect(engine.attentionPaused).toBe(false);
+        expect(engine.isPlaying).toBe(true);
+        expect(engine.attentionOverride).toBe(true);
+
+        // Further inattention samples do NOT pause while override is active
+        const nextAction = engine.onAttentionChange({
+          attentiveCount: 0,
+          distractedCount: 1,
+          totalViewers: 1,
+          nowMs: 25000,
+        });
+        expect(nextAction.type).toBe('NONE');
+        expect(engine.attentionPaused).toBe(false);
+      });
+
+      it('resumes playback and offers replay/recap when viewers face the TV again after >= 4s missed', () => {
+        engine.updatePlaybackState({
+          titleId: 'test-movie',
+          durationSec: 100,
+          currentPositionSec: 35,
+          isPlaying: false,
+        });
+        engine.attentionPaused = true;
+        engine.attentionDistractionCheckpoint = {
+          titleId: 'test-movie',
+          startPositionSec: 30,
+          pausedPositionSec: 35,
+          pausedAtMs: 15000,
+        };
+
+        // Viewer turns back to face the TV at T=20,000ms
+        const resumeAction = engine.onAttentionChange({
+          attentiveCount: 1,
+          distractedCount: 0,
+          totalViewers: 1,
+          nowMs: 20000,
+        });
+
+        expect(resumeAction.type).toBe('RESUME_ATTENTION');
+        if (resumeAction.type === 'RESUME_ATTENTION') {
+          expect(resumeAction.autoResume).toBe(true);
+          expect(resumeAction.offerReplay).toBe(true);
+          expect(resumeAction.missedSec).toBe(5);
+          expect(resumeAction.replayPositionSec).toBe(30);
+        }
+
+        expect(engine.attentionPaused).toBe(false);
+        expect(engine.isPlaying).toBe(true);
+        expect(engine.attentionReplayOffer).toBeTruthy();
+        expect(engine.attentionReplayOffer?.missedSec).toBe(5);
+
+        // Accepting replay rewinds to 30s
+        const replayPos = engine.replayAttentionMissed();
+        expect(replayPos).toBe(30);
+        expect(engine.attentionReplayOffer).toBeNull();
+      });
+
+      it('does not offer replay when missed duration is under minAttentionMissedSec (4.0s)', () => {
+        engine.updatePlaybackState({
+          titleId: 'test-movie',
+          durationSec: 100,
+          currentPositionSec: 12,
+          isPlaying: false,
+        });
+        engine.attentionPaused = true;
+        engine.attentionDistractionCheckpoint = {
+          titleId: 'test-movie',
+          startPositionSec: 10,
+          pausedPositionSec: 12, // 2s missed (< 4s)
+          pausedAtMs: 15000,
+        };
+
+        const resumeAction = engine.onAttentionChange({
+          attentiveCount: 1,
+          distractedCount: 0,
+          totalViewers: 1,
+          nowMs: 16000,
+        });
+
+        expect(resumeAction.type).toBe('RESUME_ATTENTION');
+        if (resumeAction.type === 'RESUME_ATTENTION') {
+          expect(resumeAction.autoResume).toBe(true);
+          expect(resumeAction.offerReplay).toBe(false);
+        }
+        expect(engine.attentionReplayOffer).toBeNull();
       });
     });
   });

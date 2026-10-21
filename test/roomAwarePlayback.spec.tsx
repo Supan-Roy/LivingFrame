@@ -436,4 +436,132 @@ describe('Room-Aware Playback Intelligence - Component Integration', () => {
     expect(screen.queryByTestId('recap-offer-banner')).toBeNull();
     expect(screen.getByTestId('active-recap-overlay')).toBeTruthy();
   });
+
+  it('Phase 2: pauses on sustained inattention (>70% turned away for 5s), shows subtle prompt card, and allows Keep Playing', async () => {
+    const screen = await setupPlayer();
+    const player = getPlayer();
+
+    // Baseline: 1 viewer attentive
+    dispatchEvent({
+      type: 'person_entered',
+      payload: {personCount: 1},
+    });
+    dispatchEvent({
+      type: 'attention_state',
+      payload: {attentiveCount: 1, distractedCount: 0, isDistracted: false, viewerCount: 1},
+    });
+
+    act(() => {
+      jest.advanceTimersByTime(2000);
+    });
+
+    expect(screen.queryByTestId('attention-prompt-overlay')).toBeNull();
+
+    // Viewer turns away from the TV (>70% inattentive)
+    dispatchEvent({
+      type: 'attention_state',
+      payload: {attentiveCount: 0, distractedCount: 1, isDistracted: true, viewerCount: 1},
+    });
+
+    // Before sustained period (e.g. 2s), playback does NOT pause
+    act(() => {
+      jest.advanceTimersByTime(2000);
+    });
+    expect(screen.queryByTestId('attention-prompt-overlay')).toBeNull();
+
+    // After sustained 5s, attention-aware viewing pauses playback and displays subtle prompt
+    act(() => {
+      jest.advanceTimersByTime(3500);
+    });
+
+    expect(player.pause).toHaveBeenCalled();
+    expect(screen.getByTestId('attention-prompt-overlay')).toBeTruthy();
+    expect(screen.getByText(/ATTENTION-AWARE VIEWING/i)).toBeTruthy();
+    expect(screen.getByText(/Playback paused/i)).toBeTruthy();
+
+    // User presses Keep Playing button
+    const keepPlayingBtn = screen.getByTestId('btn-attention-keep-playing');
+    fireEvent.press(keepPlayingBtn);
+
+    expect(player.play).toHaveBeenCalled();
+    expect(screen.queryByTestId('attention-prompt-overlay')).toBeNull();
+  });
+
+  it('Phase 2: thumbs-up gesture overrides inattention pause and resumes playback', async () => {
+    const screen = await setupPlayer();
+    const player = getPlayer();
+
+    dispatchEvent({
+      type: 'person_entered',
+      payload: {personCount: 1},
+    });
+    dispatchEvent({
+      type: 'attention_state',
+      payload: {attentiveCount: 0, distractedCount: 1, isDistracted: true, viewerCount: 1},
+    });
+
+    // Sustained 5s pause fires
+    act(() => {
+      jest.advanceTimersByTime(5500);
+    });
+
+    expect(screen.getByTestId('attention-prompt-overlay')).toBeTruthy();
+
+    // Viewer gives thumbs-up gesture
+    dispatchEvent({
+      type: 'gesture_detected',
+      payload: {gesture: 'thumbs_up'} as any,
+    });
+
+    expect(player.play).toHaveBeenCalled();
+    expect(screen.queryByTestId('attention-prompt-overlay')).toBeNull();
+  });
+
+  it('Phase 2: offers optional rewind/replay banner when viewers face the TV again after distraction', async () => {
+    const screen = await setupPlayer();
+    const player = getPlayer();
+
+    dispatchEvent({
+      type: 'person_entered',
+      payload: {personCount: 1},
+    });
+
+    // Baseline playback (advance 2s)
+    act(() => {
+      jest.advanceTimersByTime(2000);
+    });
+
+    // Distraction starts
+    dispatchEvent({
+      type: 'attention_state',
+      payload: {attentiveCount: 0, distractedCount: 1, isDistracted: true, viewerCount: 1},
+    });
+
+    act(() => {
+      jest.advanceTimersByTime(5500);
+    });
+
+    expect(screen.getByTestId('attention-prompt-overlay')).toBeTruthy();
+
+    // Viewers turn back to face TV (attentive returns)
+    dispatchEvent({
+      type: 'attention_state',
+      payload: {attentiveCount: 1, distractedCount: 0, isDistracted: false, viewerCount: 1},
+    });
+
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+
+    expect(screen.queryByTestId('attention-prompt-overlay')).toBeNull();
+    // Attention replay banner offered
+    expect(screen.getByTestId('attention-replay-banner')).toBeTruthy();
+    expect(screen.getByText(/WELCOME BACK/i)).toBeTruthy();
+
+    // Press Rewind button
+    const rewindBtn = screen.getByTestId('btn-attention-replay-accept');
+    fireEvent.press(rewindBtn);
+
+    expect(screen.queryByTestId('attention-replay-banner')).toBeNull();
+  });
 });

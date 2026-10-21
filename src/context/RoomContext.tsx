@@ -39,6 +39,9 @@ const defaultRoomState: RoomState = {
   gesturesEnabled: false,
   familyModeEnabled: false,
   childPresent: false,
+  attentiveCount: 0,
+  distractedCount: 0,
+  isDistracted: false,
 };
 
 const RoomContext = createContext<RoomContextValue>({
@@ -266,6 +269,39 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
                 },
               };
             });
+          } else if (parsed.type === 'attention_state') {
+            const attentive = parsed.payload?.attentiveCount ?? parsed.attentiveCount ?? 0;
+            const distracted = parsed.payload?.distractedCount ?? parsed.distractedCount ?? 0;
+            const total = attentive + distracted;
+            const isDistracted =
+              typeof parsed.payload?.isDistracted === 'boolean'
+                ? parsed.payload.isDistracted
+                : typeof parsed.isDistracted === 'boolean'
+                ? parsed.isDistracted
+                : (total > 0 && (distracted / total) > 0.70);
+            const inattentiveRatio = total > 0 ? (distracted / total) : 0;
+            console.log(
+              `[LivingFrame WS] ATTENTION STATE: ${attentive} attentive, ${distracted} distracted (isDistracted=${isDistracted})`,
+            );
+            setRoomState((prev) => ({
+              ...prev,
+              attentiveCount: attentive,
+              distractedCount: distracted,
+              isDistracted,
+              viewersPresent: total > 0 ? total : prev.viewersPresent,
+              lastEvent: {
+                id: `evt-${Date.now()}-${++eventSeqRef.current}`,
+                type: 'attention_state',
+                timestamp: receivedTimestamp,
+                payload: {
+                  attentiveCount: attentive,
+                  distractedCount: distracted,
+                  isDistracted,
+                  inattentiveRatio,
+                  viewerCount: total > 0 ? total : prev.viewersPresent,
+                },
+              },
+            }));
           } else if (parsed.type === 'room_state') {
             // Current head-count only — deliberately does not set lastEvent, so it can
             // never be mistaken for an entry/leave and trigger the Family Mode policy.
@@ -281,10 +317,16 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
                   : typeof parsed.payload?.child === 'number'
                   ? parsed.payload.child > 0
                   : prev.childPresent;
+              const attentive = parsed.payload?.attentiveCount ?? parsed.attentiveCount;
+              const distracted = parsed.payload?.distractedCount ?? parsed.distractedCount;
+              const isDistracted = parsed.payload?.isDistracted ?? parsed.isDistracted;
               return {
                 ...prev,
                 viewersPresent: typeof count === 'number' ? count : prev.viewersPresent,
                 childPresent: childDetected,
+                attentiveCount: typeof attentive === 'number' ? attentive : prev.attentiveCount,
+                distractedCount: typeof distracted === 'number' ? distracted : prev.distractedCount,
+                isDistracted: typeof isDistracted === 'boolean' ? isDistracted : prev.isDistracted,
               };
             });
           } else if (parsed.type === 'vision_status') {
@@ -468,6 +510,18 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
         typeof event.payload?.childPresent === 'boolean'
           ? event.payload.childPresent
           : prev.childPresent,
+      attentiveCount:
+        typeof event.payload?.attentiveCount === 'number'
+          ? event.payload.attentiveCount
+          : prev.attentiveCount,
+      distractedCount:
+        typeof event.payload?.distractedCount === 'number'
+          ? event.payload.distractedCount
+          : prev.distractedCount,
+      isDistracted:
+        typeof event.payload?.isDistracted === 'boolean'
+          ? event.payload.isDistracted
+          : prev.isDistracted,
     }));
   };
 

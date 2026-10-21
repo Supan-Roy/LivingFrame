@@ -7,6 +7,8 @@ import {
   RecapOfferState,
   SharedDepartureCheckpoint,
   SoloPauseCheckpoint,
+  AttentionDistractionCheckpoint,
+  AttentionReplayOfferState,
 } from '../types/playbackIntelligence';
 
 export {DEFAULT_PLAYBACK_INTELLIGENCE_CONFIG};
@@ -17,6 +19,8 @@ export type {
   RecapOfferState,
   SharedDepartureCheckpoint,
   SoloPauseCheckpoint,
+  AttentionDistractionCheckpoint,
+  AttentionReplayOfferState,
 };
 
 /**
@@ -205,6 +209,13 @@ export class RoomPlaybackEngine {
 
   public lastVoteMs: number = 0;
 
+  // --- Phase 2: Attention-Aware Viewing state ---
+  public attentionPaused: boolean = false;
+  public attentionOverride: boolean = false;
+  public attentionInattentiveSinceMs: number | null = null;
+  public attentionDistractionCheckpoint: AttentionDistractionCheckpoint | null = null;
+  public attentionReplayOffer: AttentionReplayOfferState | null = null;
+
   constructor(
     titleId: string,
     durationSec: number = 10,
@@ -245,6 +256,11 @@ export class RoomPlaybackEngine {
       this.isShowingRecap = false;
       this.recapResumePositionSec = null;
       this.pendingEmptyRoomPause = null;
+      this.attentionPaused = false;
+      this.attentionOverride = false;
+      this.attentionInattentiveSinceMs = null;
+      this.attentionDistractionCheckpoint = null;
+      this.attentionReplayOffer = null;
     }
     if (typeof durationSec === 'number' && durationSec > 0) {
       this.durationSec = durationSec;
@@ -404,7 +420,176 @@ export class RoomPlaybackEngine {
       return { type: 'DISMISS_RECAP', reason: 'timeout' };
     }
 
+    // Check sustained inattention timeout
+    if (
+      !this.attentionPaused &&
+      !this.attentionOverride &&
+      this.attentionInattentiveSinceMs !== null
+    ) {
+      const elapsed = nowMs - this.attentionInattentiveSinceMs;
+      if (elapsed >= this.config.attentionSustainedPeriodSec * 1000) {
+        this.attentionPaused = true;
+        this.isPlaying = false;
+        const startPos = Math.max(
+          0,
+          this.currentPositionSec - this.config.attentionSustainedPeriodSec,
+        );
+        this.attentionDistractionCheckpoint = {
+          titleId: this.titleId,
+          startPositionSec: startPos,
+          pausedPositionSec: this.currentPositionSec,
+          pausedAtMs: nowMs,
+        };
+        return {
+          type: 'PAUSE_ATTENTION',
+          reason: 'viewers_distracted',
+          checkpoint: this.attentionDistractionCheckpoint,
+        };
+      }
+    }
+
+    // Auto-dismiss attention replay offer if expired
+    if (this.attentionReplayOffer && nowMs >= this.attentionReplayOffer.expiresAtMs) {
+      this.attentionReplayOffer = null;
+    }
+
     return { type: 'NONE' };
+  }
+
+  /**
+   * Evaluates viewer orientation & attention.
+   * If > 70% of viewers are turned away for a sustained period, triggers PAUSE_ATTENTION.
+   * When attention returns, automatically resumes and offers replay/recap if meaningful content was missed.
+   */
+  public onAttentionChange({
+    attentiveCount,
+    distractedCount,
+    totalViewers,
+    nowMs = Date.now(),
+  }: {
+    attentiveCount: number;
+    distractedCount: number;
+    totalViewers?: number;
+    nowMs?: number;
+  }): PlaybackPolicyAction {
+    const total =
+      typeof totalViewers === 'number' && totalViewers > 0
+        ? totalViewers
+        : attentiveCount + distractedCount;
+
+    if (total === 0) {
+      this.attentionInattentiveSinceMs = null;
+      return { type: 'NONE' };
+    }
+
+    const inattentiveCount = distractedCount;
+    const ratio = inattentiveCount / total;
+    const isDistracted = ratio > this.config.attentionInattentiveThreshold;
+
+    if (isDistracted) {
+      if (this.attentionOverride) {
+        return { type: 'NONE' };
+      }
+
+      if (!this.attentionPaused) {
+        if (this.attentionInattentiveSinceMs === null) {
+          this.attentionInattentiveSinceMs = nowMs;
+        }
+        const elapsed = nowMs - this.attentionInattentiveSinceMs;
+        if (elapsed >= this.config.attentionSustainedPeriodSec * 1000) {
+          this.attentionPaused = true;
+          this.isPlaying = false;
+          const startPos = Math.max(
+            0,
+            this.currentPositionSec - this.config.attentionSustainedPeriodSec,
+          );
+          this.attentionDistractionCheckpoint = {
+            titleId: this.titleId,
+            startPositionSec: startPos,
+            pausedPositionSec: this.currentPositionSec,
+            pausedAtMs: nowMs,
+          };
+          return {
+            type: 'PAUSE_ATTENTION',
+            reason: 'viewers_distracted',
+            checkpoint: this.attentionDistractionCheckpoint,
+          };
+        }
+      }
+      return { type: 'NONE' };
+    }
+
+    // Viewers are facing the TV again
+    this.attentionInattentiveSinceMs = null;
+    this.attentionOverride = false;
+
+    if (this.attentionPaused) {
+      this.attentionPaused = false;
+      this.isPlaying = true;
+      const checkpoint = this.attentionDistractionCheckpoint;
+      this.attentionDistractionCheckpoint = null;
+
+      const missedSec = checkpoint
+        ? Math.max(0, checkpoint.pausedPositionSec - checkpoint.startPositionSec)
+        : 0;
+      const replayPos = checkpoint ? checkpoint.startPositionSec : this.currentPositionSec;
+      const offerReplay = missedSec >= this.config.minAttentionMissedSec;
+
+      if (offerReplay) {
+        this.attentionReplayOffer = {
+          titleId: this.titleId,
+          missedSec,
+          replayPositionSec: replayPos,
+          offeredAtMs: nowMs,
+          expiresAtMs: nowMs + 12000,
+          metadata: this.metadata,
+        };
+      }
+
+      return {
+        type: 'RESUME_ATTENTION',
+        autoResume: true,
+        offerReplay,
+        missedSec,
+        replayPositionSec: replayPos,
+      };
+    }
+
+    return { type: 'NONE' };
+  }
+
+  /**
+   * Viewer override: If any viewer gives a thumbs-up (or selects "Keep Playing"),
+   * allows playback to continue even if the majority remains turned away.
+   */
+  public overrideAttention(nowMs: number = Date.now()): PlaybackPolicyAction {
+    this.attentionOverride = true;
+    this.attentionInattentiveSinceMs = null;
+    if (this.attentionPaused) {
+      this.attentionPaused = false;
+      this.isPlaying = true;
+      this.attentionDistractionCheckpoint = null;
+      return { type: 'OVERRIDE_ATTENTION', resume: true };
+    }
+    return { type: 'OVERRIDE_ATTENTION', resume: false };
+  }
+
+  /**
+   * Dismiss the optional attention replay banner.
+   */
+  public dismissAttentionOffer(): PlaybackPolicyAction {
+    this.attentionReplayOffer = null;
+    return { type: 'NONE' };
+  }
+
+  /**
+   * Accepts the replay offer, returning the replay seek position.
+   */
+  public replayAttentionMissed(): number {
+    const replayPos =
+      this.attentionReplayOffer?.replayPositionSec ?? this.currentPositionSec;
+    this.attentionReplayOffer = null;
+    return replayPos;
   }
 
   /**

@@ -38,7 +38,8 @@ export interface RoomEvent {
     | 'recap_requested'
     | 'connectivity_test'
     | 'play_video'
-    | 'vision_status';
+    | 'vision_status'
+    | 'attention_state';
   timestamp: number;
   payload: {
     viewerCount?: number;
@@ -51,6 +52,10 @@ export interface RoomEvent {
     source?: string;
     childCount?: number;
     childPresent?: boolean;
+    attentiveCount?: number;
+    distractedCount?: number;
+    isDistracted?: boolean;
+    inattentiveRatio?: number;
   };
 }
 
@@ -73,4 +78,8 @@ export interface RoomState {
   familyModeEnabled: boolean;
   /** Rough estimate from body proportions — not identity and not a certainty. */
   childPresent: boolean;
+  /** Phase 2: Attention-Aware Viewing metrics */
+  attentiveCount: number;
+  distractedCount: number;
+  isDistracted: boolean;
 }

@@ -72,6 +72,15 @@ export const VideoPlayerView = ({
   const [focusedOfferControl, setFocusedOfferControl] = useState<'show' | 'dismiss'>('show');
   const [focusedModalBtn, setFocusedModalBtn] = useState<'resume' | 'skip'>('resume');
 
+  // --- Phase 2: Attention-Aware Viewing state ---
+  const [isAttentionPaused, setIsAttentionPaused] = useState<boolean>(false);
+  const [attentionReplayOffer, setAttentionReplayOffer] = useState<{
+    missedSec: number;
+    replayPositionSec: number;
+  } | null>(null);
+  const [focusedAttentionBtn, setFocusedAttentionBtn] = useState<'keep_playing' | 'dismiss'>('keep_playing');
+  const [focusedAttentionReplayBtn, setFocusedAttentionReplayBtn] = useState<'replay' | 'dismiss'>('replay');
+
   const engineRef = useRef<RoomPlaybackEngine | null>(null);
   if (!engineRef.current) {
     engineRef.current = new RoomPlaybackEngine(
@@ -637,6 +646,36 @@ export const VideoPlayerView = ({
           setRecapOffer(null);
           break;
         }
+        case 'PAUSE_ATTENTION': {
+          if (isPlayingRef.current) {
+            handlePause();
+          }
+          setIsAttentionPaused(true);
+          showRoomNotice('Attention paused · Viewers turned away');
+          break;
+        }
+        case 'RESUME_ATTENTION': {
+          setIsAttentionPaused(false);
+          if (action.offerReplay && action.missedSec >= 4) {
+            setAttentionReplayOffer({
+              missedSec: action.missedSec,
+              replayPositionSec: action.replayPositionSec,
+            });
+          }
+          if (action.autoResume && !isPlayingRef.current) {
+            handlePlay();
+          }
+          showRoomNotice('Attention returned · Resuming');
+          break;
+        }
+        case 'OVERRIDE_ATTENTION': {
+          setIsAttentionPaused(false);
+          if (action.resume && !isPlayingRef.current) {
+            handlePlay();
+          }
+          showRoomNotice('Playback continuing (Thumbs Up 👍)');
+          break;
+        }
         case 'NONE':
         default:
           break;
@@ -644,6 +683,32 @@ export const VideoPlayerView = ({
     },
     [handlePause, handlePlay, seekTo, showRoomNotice],
   );
+
+  const handleKeepPlaying = useCallback(() => {
+    const engine = engineRef.current;
+    if (engine) {
+      const action = engine.overrideAttention(Date.now());
+      handlePolicyAction(action);
+    }
+  }, [handlePolicyAction]);
+
+  const handleAcceptAttentionReplay = useCallback(() => {
+    if (!attentionReplayOffer) {
+      return;
+    }
+    const replayPos = attentionReplayOffer.replayPositionSec;
+    const missed = Math.round(attentionReplayOffer.missedSec);
+    setAttentionReplayOffer(null);
+    engineRef.current?.dismissAttentionOffer();
+    seekTo(replayPos);
+    handlePlay();
+    showRoomNotice(`Rewound ${missed}s`);
+  }, [attentionReplayOffer, seekTo, handlePlay, showRoomNotice]);
+
+  const handleDismissAttentionReplay = useCallback(() => {
+    setAttentionReplayOffer(null);
+    engineRef.current?.dismissAttentionOffer();
+  }, []);
 
   const handleAcceptRecap = useCallback(() => {
     const engine = engineRef.current;
@@ -711,12 +776,46 @@ export const VideoPlayerView = ({
     }
   }, [roomState.viewersPresent, handlePolicyAction]);
 
+  // React to attention state changes (Phase 2: Attention-Aware Viewing)
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) {
+      return;
+    }
+    const action = engine.onAttentionChange({
+      attentiveCount: roomState.attentiveCount,
+      distractedCount: roomState.distractedCount,
+      totalViewers: roomState.viewersPresent,
+      nowMs: Date.now(),
+    });
+    if (action.type !== 'NONE') {
+      handlePolicyAction(action);
+    }
+  }, [
+    roomState.attentiveCount,
+    roomState.distractedCount,
+    roomState.isDistracted,
+    roomState.viewersPresent,
+    handlePolicyAction,
+  ]);
+
   // Grace period and offer auto-dismiss ticker (200ms)
   useEffect(() => {
     const interval = setInterval(() => {
       const engine = engineRef.current;
       if (!engine) {
         return;
+      }
+      if (isPlayingRef.current && playbackStartWallRef.current !== null && item) {
+        const elapsed = (Date.now() - playbackStartWallRef.current) / 1000 + pausedOffsetRef.current;
+        const cur = durationSec > 0 ? elapsed % durationSec : elapsed;
+        engine.updatePlaybackState({
+          titleId: item.id,
+          durationSec,
+          currentPositionSec: Math.min(durationSec, Math.max(0, cur)),
+          isPlaying: isPlayingRef.current,
+          metadata: item.recap,
+        });
       }
       const action = engine.checkGracePeriod(Date.now());
       if (action.type !== 'NONE') {
@@ -725,9 +824,17 @@ export const VideoPlayerView = ({
       if (engine.recapOffer) {
         setRecapOffer({...engine.recapOffer});
       }
+      if (engine.attentionReplayOffer) {
+        setAttentionReplayOffer({
+          missedSec: engine.attentionReplayOffer.missedSec,
+          replayPositionSec: engine.attentionReplayOffer.replayPositionSec,
+        });
+      } else if (attentionReplayOffer && !engine.attentionReplayOffer) {
+        setAttentionReplayOffer(null);
+      }
     }, 200);
     return () => clearInterval(interval);
-  }, [handlePolicyAction]);
+  }, [handlePolicyAction, attentionReplayOffer]);
 
   // --- Family Mode / room-aware protection --------------------------------
   // A child in the room (detected, or already present when Family Mode is switched on)
@@ -883,6 +990,11 @@ export const VideoPlayerView = ({
             setRecapOffer({...engine.recapOffer});
           }
         }
+      } else if (engine) {
+        // Phase 2: Thumbs-up overrides inattention and allows playback to continue
+        const action = engine.overrideAttention(Date.now());
+        handlePolicyAction(action);
+        showGestureFeedback('Keep Playing 👍');
       } else {
         showGestureFeedback('Thumbs Up');
       }
@@ -920,6 +1032,37 @@ export const VideoPlayerView = ({
         }
       }
       return;
+    }
+
+    // Phase 2: If attention-aware pause prompt is active, select or play resumes playback
+    if (isAttentionPaused) {
+      if (eventType === 'back') {
+        onClose();
+      } else if (eventType === 'select' || eventType === 'play' || eventType === 'play_pause') {
+        handleKeepPlaying();
+      }
+      return;
+    }
+
+    // Phase 2: If attention replay offer banner is active, allow remote selection
+    if (attentionReplayOffer && !isShowingRecap) {
+      if (eventType === 'left') {
+        setFocusedAttentionReplayBtn('replay');
+        return;
+      } else if (eventType === 'right') {
+        setFocusedAttentionReplayBtn('dismiss');
+        return;
+      } else if (eventType === 'select') {
+        if (focusedAttentionReplayBtn === 'replay') {
+          handleAcceptAttentionReplay();
+        } else {
+          handleDismissAttentionReplay();
+        }
+        return;
+      } else if (eventType === 'back') {
+        handleDismissAttentionReplay();
+        return;
+      }
     }
 
     // If recap modal is displayed, trap focus in the modal
@@ -1668,6 +1811,90 @@ export const VideoPlayerView = ({
               </Pressable>
             </TVFocusGuideView>
           </View>
+        </View>
+      )}
+
+      {/* Phase 2: Attention-Aware Viewing - Subtle Pause Prompt */}
+      {isAttentionPaused && (
+        <View style={styles.attentionPromptOverlay} testID="attention-prompt-overlay">
+          <View style={styles.attentionPromptCard}>
+            <View style={styles.attentionPromptIconBox}>
+              <Icon name="spark" size={18} color="#00E5FF" />
+            </View>
+            <View style={styles.attentionPromptContent}>
+              <View style={styles.attentionPromptBadge}>
+                <View style={styles.attentionPromptPulseDot} />
+                <Text style={styles.attentionPromptBadgeText}>ATTENTION-AWARE VIEWING</Text>
+              </View>
+              <Text style={styles.attentionPromptTitle}>Playback paused</Text>
+              <Text style={styles.attentionPromptSubtitle}>
+                Viewers appear turned away from the TV. Look toward the screen to resume, or give a thumbs-up to keep playing.
+              </Text>
+            </View>
+            <TVFocusGuideView style={styles.attentionPromptActions}>
+              <Pressable
+                style={[
+                  styles.attentionPromptBtn,
+                  focusedAttentionBtn === 'keep_playing' && styles.attentionPromptBtnFocused,
+                ]}
+                onFocus={() => setFocusedAttentionBtn('keep_playing')}
+                onPress={handleKeepPlaying}
+                hasTVPreferredFocus
+                accessibilityRole="button"
+                accessibilityLabel="Keep playing"
+                testID="btn-attention-keep-playing">
+                <Text style={styles.attentionPromptBtnText}>Keep Playing 👍</Text>
+              </Pressable>
+            </TVFocusGuideView>
+          </View>
+        </View>
+      )}
+
+      {/* Phase 2: Optional Replay / Recap Offer after returning attention */}
+      {attentionReplayOffer && !isShowingRecap && !isAttentionPaused && (
+        <View style={styles.attentionReplayBanner} testID="attention-replay-banner">
+          <View style={styles.attentionReplayLeft}>
+            <View style={styles.attentionReplayBadge}>
+              <Icon name="spark" size={12} color="#00E5FF" />
+              <Text style={styles.attentionReplayBadgeText}>WELCOME BACK</Text>
+            </View>
+            <Text style={styles.attentionReplayTitle}>
+              Missed ~{Math.round(attentionReplayOffer.missedSec)}s while turned away?
+            </Text>
+            <Text style={styles.attentionReplaySubtitle}>
+              Optional rewind to catch up before continuing
+            </Text>
+          </View>
+          <TVFocusGuideView style={styles.attentionReplayActions}>
+            <Pressable
+              style={[
+                styles.attentionReplayBtn,
+                styles.attentionReplayAcceptBtn,
+                focusedAttentionReplayBtn === 'replay' && styles.attentionReplayBtnFocused,
+              ]}
+              onFocus={() => setFocusedAttentionReplayBtn('replay')}
+              onPress={handleAcceptAttentionReplay}
+              accessibilityRole="button"
+              accessibilityLabel="Replay missed portion"
+              testID="btn-attention-replay-accept">
+              <Text style={styles.attentionReplayAcceptText}>
+                Rewind {Math.round(attentionReplayOffer.missedSec)}s
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.attentionReplayBtn,
+                styles.attentionReplayDismissBtn,
+                focusedAttentionReplayBtn === 'dismiss' && styles.attentionReplayBtnFocused,
+              ]}
+              onFocus={() => setFocusedAttentionReplayBtn('dismiss')}
+              onPress={handleDismissAttentionReplay}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss replay offer"
+              testID="btn-attention-replay-dismiss">
+              <Text style={styles.attentionReplayDismissText}>Dismiss</Text>
+            </Pressable>
+          </TVFocusGuideView>
         </View>
       )}
     </View>
@@ -2536,6 +2763,190 @@ const styles = StyleSheet.create({
   activeRecapSkipBtnText: {
     color: '#E2E8F0',
     fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // --- Phase 2: Attention-Aware Viewing Styles ---
+  attentionPromptOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(5, 8, 18, 0.72)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 90,
+  },
+  attentionPromptCard: {
+    backgroundColor: '#0F172A',
+    borderColor: '#00E5FF',
+    borderWidth: 1.5,
+    borderRadius: 18,
+    padding: 28,
+    maxWidth: 580,
+    width: '88%',
+    alignItems: 'center',
+    shadowColor: '#00E5FF',
+    shadowOffset: {width: 0, height: 6},
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  attentionPromptIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 229, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 229, 255, 0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  attentionPromptContent: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  attentionPromptBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 229, 255, 0.12)',
+    borderColor: 'rgba(0, 229, 255, 0.35)',
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginBottom: 10,
+  },
+  attentionPromptPulseDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#00E5FF',
+    marginRight: 7,
+  },
+  attentionPromptBadgeText: {
+    color: '#00E5FF',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  attentionPromptTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  attentionPromptSubtitle: {
+    color: '#94A3B8',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    paddingHorizontal: 12,
+  },
+  attentionPromptActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  attentionPromptBtn: {
+    backgroundColor: '#00E5FF',
+    borderColor: '#00E5FF',
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 26,
+    paddingVertical: 12,
+  },
+  attentionPromptBtnFocused: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
+    transform: [{scale: 1.05}],
+  },
+  attentionPromptBtnText: {
+    color: '#0F172A',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  // Attention Replay / Recap Banner
+  attentionReplayBanner: {
+    position: 'absolute',
+    bottom: 110,
+    left: '50%',
+    marginLeft: -290,
+    width: 580,
+    backgroundColor: 'rgba(15, 23, 42, 0.96)',
+    borderColor: 'rgba(0, 229, 255, 0.4)',
+    borderWidth: 1.5,
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 85,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 4},
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  attentionReplayLeft: {
+    flex: 1,
+    marginRight: 16,
+  },
+  attentionReplayBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  attentionReplayBadgeText: {
+    color: '#00E5FF',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginLeft: 6,
+  },
+  attentionReplayTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  attentionReplaySubtitle: {
+    color: '#94A3B8',
+    fontSize: 11,
+  },
+  attentionReplayActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  attentionReplayBtn: {
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderWidth: 1.5,
+  },
+  attentionReplayAcceptBtn: {
+    backgroundColor: '#00E5FF',
+    borderColor: '#00E5FF',
+  },
+  attentionReplayDismissBtn: {
+    backgroundColor: 'rgba(51, 65, 85, 0.6)',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  attentionReplayBtnFocused: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
+    transform: [{scale: 1.05}],
+  },
+  attentionReplayAcceptText: {
+    color: '#0F172A',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  attentionReplayDismissText: {
+    color: '#E2E8F0',
+    fontSize: 12,
     fontWeight: '600',
   },
 });
