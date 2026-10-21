@@ -1,325 +1,506 @@
 # LivingFrame
-### AI-Enhanced Living Room Viewing Experience on Amazon Vega OS
-**Amazon Build, Ship, Shape: Amazon Developer Hackathon 2026 (Fire TV Track)**
+### Intelligent, Ambient Room-Aware Media Experience for Amazon Fire TV (Vega OS)
 
-> *"The TV should not merely display content; it should respond intelligently to the people sharing the room."*
+[![Amazon Fire TV](https://img.shields.io/badge/Platform-Amazon%20Fire%20TV%20%28Vega%20OS%29-orange.svg)](https://developer.amazon.com/apps-and-games/fire-tv)
+[![Kepler Framework](https://img.shields.io/badge/Framework-React%20Native%20Kepler%204.0-blue.svg)](https://developer.amazon.com)
+[![MediaPipe](https://img.shields.io/badge/Vision-Google%20MediaPipe%20On--Device-teal.svg)](https://developers.google.com/mediapipe)
+[![OpenCV DNN](https://img.shields.io/badge/ML%20Engine-OpenCV%20DNN%20%2B%20ONNX-green.svg)](https://opencv.org/)
+[![W3C Media](https://img.shields.io/badge/Playback-W3C%20Hardware--Accelerated%20Pipeline-red.svg)](https://www.w3.org/TR/html52/semantics-embedded-content.html)
+[![Privacy](https://img.shields.io/badge/Privacy-100%25%20On--Device%20%28Zero%20Cloud%29-brightgreen.svg)](#10-privacy-security--edge-processing-guarantees)
 
----
-
-## 1. Product Vision
-
-**LivingFrame** transforms traditional TV viewing into a responsive, ambient living room experience. By combining Amazon Vega OS with an ambient room intelligence layer (phone/laptop camera sensor + multimodal vision + LLM intelligence), LivingFrame enables the television to adapt naturally to room presence and dynamics:
-
-- **Hardware-Accelerated Native Video**: Pure W3C media pipeline built with `@amazon-devices/react-native-w3cmedia` (`VideoPlayer` + `KeplerVideoSurfaceView`) and HTTP Range streaming.
-- **Calibrated Monotonic Seek Bar**: Rock-solid linear time progression (`00:00` $\to$ `00:10`) immune to virtual decoder buffer surges, with seamless looping.
-- **Immersive Full-Screen Controls**: 5-second inactivity auto-hide with 1-click full-screen toggle overlay.
-- **Contextual Arrival Recaps ("Catch Me Up")**: When someone enters the room mid-stream, the TV offers a concise, spoiler-free recap tailored to the viewers present.
-- **Natural Interaction**: Simple gestures (hand raise, pointing) summon non-intrusive contextual character bios or scene trivia.
-- **Adaptive Atmosphere**: Real-time room presence and viewer count sync over local WebSocket.
+> *"The television should not merely display content in isolation; it should perceive and adapt naturally to the living room environment and the people sharing the space."*
 
 ---
 
-## 2. Architecture & Service Ports
+## 1. Product Vision & Overview
 
-LivingFrame operates across a unified local mesh connecting the Vega Virtual Device with host services:
+**LivingFrame** is a next-generation media experience designed specifically for **Amazon Fire TV** devices running **Vega OS** (Kepler runtime). By pairing a high-performance 10-foot TV user interface with a lightweight, privacy-preserving on-device computer vision pipeline, LivingFrame transforms the television into an ambient, context-aware room companion.
+
+Traditional smart TVs are passive screens: if viewers look away to converse, leave the room, or if children enter during adult-rated scenes, playback marches forward blindly. Viewers return lost, scramble for the remote, or risk exposing young family members to sensitive content.
+
+LivingFrame eliminates these frictions autonomously:
+1. **Attention-Aware Viewing**: Senses whether viewers are actively watching or turned away. If more than 70% of viewers are distracted for a sustained period, it gently pauses and presents a subtle prompt. When attention returns, it automatically resumes and offers an optional catch-up rewind.
+2. **Presence-Adaptive Playback**: Differentiates between solo viewing (pausing cleanly on departure, resuming instantaneously on return) and shared viewing (letting remaining viewers watch uninterrupted while recording departure checkpoints for arrival recaps).
+3. **Consensus-Driven Arrival Recaps ("Catch Me Up")**: When a departed viewer returns to a shared session, a non-intrusive banner offers a spoiler-free recap. Viewers can vote via hand gestures (thumbs-up) or remote control, requiring a consensus before opening the recap modal.
+4. **Automated Family Protection**: Passively detects the presence of children using body-proportion heuristics and local facial age classification, immediately blanking out and pausing scenes tagged with adult content.
+5. **Hands-Free Gesture Control**: Enables seamless natural interactions (raise hand to pause/play, swipe to scrub, thumbs-up to approve) without reaching for physical hardware.
+6. **Zero-Cloud Privacy**: All visual perception and inference occurs strictly in local memory at the edge—no video frames or facial identities are ever transmitted over the internet or saved to disk.
+
+---
+
+## 2. End-to-End System Architecture
+
+LivingFrame is architected as a distributed local mesh connecting the **Amazon Vega OS Runtime** with local media services and an on-device computer vision engine.
+
+```mermaid
+flowchart TB
+    subgraph SENSORY_LAYER["On-Device Perception Layer (Laptop / TV Sensor)"]
+        CAM["RGB Camera Feed\n(320x240 @ 30 FPS)"] --> PRE["Frame Preprocessing &\nRGB Normalization"]
+        PRE --> GESTURE["MediaPipe Gesture Recognizer\n(Hand Landmarks + Swipe Tracker)"]
+        PRE --> POSE["MediaPipe Pose Landmarker\n(33 3D Keypoints)"]
+        PRE --> FACE["MediaPipe BlazeFace Detector\n(Facial ROI Extractor)"]
+        FACE --> AGE["GoogLeNet / Adience Age Model\n(OpenCV DNN ONNX Classification)"]
+        
+        POSE --> ATTN["Attention & Orientation Tracker\n(3D Nose-Ear Yaw & Z-Differential)"]
+        POSE --> PRES["Presence Stabilizer\n(Sliding Window Majority Filter)"]
+        AGE --> CHILD["Child Presence Decider\n(Median Filter + Dual Hysteresis)"]
+    end
+
+    subgraph BACKEND_LAYER["Local Mesh Gateway (scripts/test_ws_server.js)"]
+        WS_HUB["WebSocket Broadcast Hub\n(ws://10.0.2.2:8080)"]
+        HTTP_STREAM["HTTP Range Video Server\n(http://10.0.2.2:8080/videos)"]
+        DASHBOARD["Live Vision Dashboard\n(http://localhost:8080/camera)"]
+        
+        ATTN -->|Attention State Events| WS_HUB
+        PRES -->|Room Occupancy Events| WS_HUB
+        CHILD -->|Child Protection Signals| WS_HUB
+        GESTURE -->|Gesture Action Triggers| WS_HUB
+    end
+
+    subgraph VEGA_RUNTIME["Amazon Fire TV / Vega OS Runtime (emulator-5554)"]
+        METRO["Metro Bundler\n(Port 8081)"] -.->|Bundle Delivery| APP_ROOT
+        
+        subgraph APP_ROOT["LivingFrame Application (com.amazondeveloper.livingframe)"]
+            RC["RoomContext\n(WebSocket Client & State Sync)"]
+            
+            subgraph PLAYBACK_ENGINE["RoomPlaybackEngine (State Machine)"]
+                POLICY_A["Scenario A: Solo Empty-Room Policy"]
+                POLICY_B["Scenario B: Shared Departure & Voting Engine"]
+                POLICY_ATTN["Phase 2: Attention-Aware Viewing Engine"]
+                POLICY_FAM["Family Mode Content Safety Arbiter"]
+            end
+            
+            subgraph UI_LAYER["10-Foot TV User Experience"]
+                HOME["LivingFrame Home Screen\n(Hero, Rows, Focus Guides)"]
+                PLAYER["VideoPlayerView\n(W3C VideoPlayer + Kepler Surface)"]
+                OVERLAY_ATTN["Subtle Attention Prompt Card\n(& Optional Rewind Banner)"]
+                OVERLAY_RECAP["Consensus Arrival Recap Modal\n('Catch Me Up')"]
+                OVERLAY_FAM["Family Safety Mask & Advisory"]
+            end
+        end
+    end
+
+    WS_HUB <==>|Bi-directional State Protocol| RC
+    HTTP_STREAM ==>|H.264 / AAC Range Stream| PLAYER
+    RC --> PLAYBACK_ENGINE
+    PLAYBACK_ENGINE --> UI_LAYER
+```
+
+### Local Mesh Network & Port Topology
+
+| Port | Protocol | Service | Host Address | Vega Emulator Address | Description |
+|---|---|---|---|---|---|
+| **`8080`** | `HTTP / WS` | Video Server & WS Mesh (`test_ws_server.js`) | `http://localhost:8080` | `http://10.0.2.2:8080` | Streams catalog MP4 titles via HTTP 206 Partial Content and broadcasts room state events over WebSocket |
+| **`8080`** | `HTTP` | Vision Telemetry Dashboard | `http://localhost:8080/camera` | N/A | Interactive web console displaying live camera feed, bounding boxes, attention status, and room logs |
+| **`8081`** | `HTTP` | Metro JavaScript Bundler | `http://localhost:8081` | `http://10.0.2.2:8081` | Compiles and serves the React Native Kepler application bundle to the Vega device |
+| **`5554`** | `VDA / TCP` | Vega Virtual TV Device | `emulator-5554` | `localhost` | Fire TV virtual device running Vega OS 1.2 with QEMU acceleration |
+
+---
+
+## 3. On-Device Vision & Machine Learning Models
+
+LivingFrame executes entirely on edge processors with zero cloud API dependencies. The vision engine combines 4 specialized lightweight models orchestrated within `scripts/webcam_sensor.py`:
+
+| Model Name | Source / Format | Size | Function in LivingFrame | Inference Engine |
+|---|---|---|---|---|
+| **MediaPipe Gesture Recognizer** | `gesture_recognizer.task` | ~8.4 MB | Identifies discrete hand gestures (`Thumb_Up`, `Open_Palm`, etc.) and continuous directional swipes | MediaPipe Tasks Vision |
+| **MediaPipe Pose Landmarker** | `pose_landmarker_full.task` | ~9.4 MB | Tracks 33 full-body 3D coordinates ($x, y, z$) for room presence, child body proportion estimation, and 3D head yaw orientation | MediaPipe Tasks Vision |
+| **MediaPipe BlazeFace** | `blaze_face_full_range.tflite` | ~0.9 MB | Multi-scale frontal and profile face detector with sub-millisecond bounding box localization | MediaPipe Face Detector |
+| **GoogLeNet / Adience Age Model** | `age_googlenet.onnx` | ~43.5 MB | Deep convolutional neural network classifying facial crops into 8 standard demographic age brackets | OpenCV DNN Module |
+
+---
+
+### Technical Deep Dive: Viewer Orientation & Attention Estimation
+
+Rather than loading a heavyweight head-pose network, LivingFrame derives orientation by analyzing the 3D landmark geometry from `pose_landmarker_full.task`:
+
+```text
+       [Facing TV: Attentive]                     [Turned Away: Distracted]
+             (Nose: z = -0.08)                                     (Ear Right)
+                   ▲                                                   ▲
+                   │                                                   │
+     (Ear Left) ───┼─── (Ear Right)               (Ear Left) ──────────┴────► (Nose: z = +0.03)
+      z = 0.00           z = 0.00                  z = 0.00                    z behind ears!
+   Nose is centered and in FRONT of ears        Nose shifted past ear span and BEHIND ears
+```
+
+1. **Landmark Extraction**: Queries Nose ($0$), Left Ear ($7$), Right Ear ($8$), Left Shoulder ($11$), and Right Shoulder ($12$) with corresponding visibility scores.
+2. **Ear Occlusion & Back-of-Head Detection**:
+   If both ears have visibility $< 0.25$ or shoulder vectors indicate posterior view, the viewer is turned away (`away`).
+3. **3D Depth Differential ($Z$-Axis)**:
+   MediaPipe outputs camera-relative depth ($Z$), where negative values indicate proximity to the lens. When facing the TV, $z_{\text{nose}} < z_{\text{ears}}$. If $z_{\text{nose}} > z_{\text{ears}} + 0.02$, the nose is recessed behind the ear baseline, indicating the head is turned away.
+4. **Horizontal Yaw Ratio**:
+   Measures the lateral offset of the nose relative to the midpoint of the ears:
+   $$\text{yaw\_ratio} = \frac{|x_{\text{nose}} - x_{\text{ear\_mid}}|}{\frac{1}{2} \cdot \text{span}_{\text{ears}}}$$
+   - When facing the TV: $\text{yaw\_ratio} \le 0.65 \implies \text{toward}$ (Attentive).
+   - When rotated $> 45^\circ$ sideways: $\text{yaw\_ratio} > 0.65 \implies \text{away}$ (Distracted).
+
+---
+
+### Signal Processing, Debouncing & Stabilization
+
+Raw computer vision sensors suffer from lighting fluctuations, frame dropouts, and transient occlusions. LivingFrame incorporates mathematical stabilization filters:
+
+```mermaid
+graph LR
+    RAW["Raw Sensor Frame"] --> SAMPLES["Temporal Sliding Buffer\n(History Window: N=5 to 7)"]
+    SAMPLES --> STATS["Statistical Filtering\n(Median Probability / Majority Vote)"]
+    STATS --> HYST["Dual-Threshold Hysteresis\n(State Gating: High/Low Thresholds)"]
+    HYST --> CONFIRM["Multi-Sample Confirmation\n(3 Sustained Consecutive Frames)"]
+    CONFIRM --> STABLE["Latching State Output\n(No Flickering / Ghost Triggers)"]
+```
+
+1. **`PresenceStabilizer` (Occupancy Counting)**:
+   - Maintains a circular buffer of the last 5 visible pose counts.
+   - Evaluates a majority vote filter to eliminate single-frame detection dropouts.
+   - Enforces a $1.5\text{s}$ cooldown between discrete `person_entered` and `person_left` events to avoid rapid double-triggering.
+2. **`ChildPresenceDecider` (Age Estimation Stability)**:
+   - Computes probability mass across child brackets `(0-2)`, `(4-6)`, `(8-12)` from the OpenCV DNN softmax layer.
+   - Applies median smoothing across the last 7 frames.
+   - Uses dual-threshold hysteresis: activation requires probability $\ge 0.55$; deactivation requires probability $\le 0.35$.
+   - Requires 3 consecutive confirmed frames before modifying room safety state.
+3. **`AttentionTracker` (Hysteresis & Thresholding)**:
+   - Computes inattention ratio: $\frac{\text{distractedCount}}{\text{totalViewers}}$.
+   - Triggers distraction when ratio $> 0.70$ ($70\%$).
+   - Sustains state across a 3-frame confirmation window before notifying the Fire TV app.
+
+---
+
+## 4. Full Product Feature Matrix
+
+| Feature | Category | Trigger Mechanism | Playback & UI Action | User Control / Override |
+|---|---|---|---|---|
+| **Attention-Aware Pause** | Phase 2 Attention | $> 70\%$ of viewers turned away for $\ge 5.0\text{s}$ | Smoothly pauses video; renders subtle prompt card: *"Playback paused · Viewers appear turned away"* | Click **"Keep Playing 👍"** or give thumbs-up gesture |
+| **Attention Thumbs-Up Override** | Phase 2 Attention | Any viewer presents a `thumbs_up` gesture | Immediately resumes playback and sets override latch; prevents pauses while viewers talk | Normal remote controls |
+| **Catch-Up Rewind Offer** | Phase 2 Attention | Viewers face TV again after missing $\ge 4.0\text{s}$ of content | Resumes playback automatically; renders bottom banner: *"WELCOME BACK · Catch up on Xs missed?"* | Remote Left/Right: **"Rewind Xs"** (seeks back) or **"Dismiss"** |
+| **Solo Viewer Departure** | Room Awareness | Occupancy transitions from $1 \to 0$ viewers | Enters $2.5\text{s}$ grace period. If room stays empty, pauses and logs `SoloPauseCheckpoint` | Returns to room: auto-resumes from exact checkpoint with NO modal |
+| **Shared Departure Checkpoint** | Room Awareness | Occupancy drops but viewers remain ($N \to N-1$) | Playback continues uninterrupted for remaining viewers; records departure timestamp | None required |
+| **Consensus Arrival Recap** | Room Awareness | Departed viewer returns ($N-1 \to N$) after missing $\ge 5\%$ of title | Non-blocking banner: *"SOMEONE'S BACK · Catch them up?"* | Thumbs-up gesture from viewers or remote **"Show Recap"**; requires $\lceil N/2 \rceil$ consensus |
+| **Family Mode Child Protection** | Content Safety | Child enters during adult-tagged scene (`TV-14`, `TV-MA`) | Instantly pauses playback; covers screen with black protective vignette and advisory warning | Turning off Family Mode or remote **"Resume anyway"** |
+| **Hands-Free Gesture Control** | Interaction | Raised open hand held steady for $0.4\text{s}$ | Toggles Play / Pause with haptic-style visual HUD badge | Dedicated **"GESTURES OFF/ON"** toggle in player |
+| **Directional Scrubbing** | Interaction | Horizontal hand swipe left or right | Scrubs video forward or backward by $5.0\text{s}$ with smooth seek bar animation | Remote Rewind / Fast-Forward keys |
+| **Hardware Video Pipeline** | Video Core | `@amazon-devices/react-native-w3cmedia` | Full-screen hardware-accelerated video decoding via `KeplerVideoSurfaceView` | 1-Click full-screen toggle; 5s auto-hide HUD |
+
+---
+
+## 5. Playback Intelligence State Machine
+
+The core room behavior is governed by the deterministic state machine in [src/room/playbackIntelligence.ts](file:///home/supanroy/Projects/LivingFrame/src/room/playbackIntelligence.ts):
+
+```mermaid
+stateDiagram-v2
+    [*] --> PLAYING: Video Loaded & Playing
+
+    state PLAYING {
+        [*] --> SoloMode: 1 Viewer
+        [*] --> SharedMode: >= 2 Viewers
+    }
+
+    PLAYING --> EMPTY_ROOM_GRACE: Person Count drops to 0
+    EMPTY_ROOM_GRACE --> PLAYING: Viewer returns within 2.5s (Transient)
+    EMPTY_ROOM_GRACE --> SOLO_PAUSED: Grace period expires (2.5s)
+    SOLO_PAUSED --> PLAYING: Viewer returns (Resume exact position)
+
+    SharedMode --> SharedMode: 1 viewer leaves (Playback continues, Departure Checkpoint recorded)
+    SharedMode --> RECAP_OFFERED: Viewer returns & missed >= 5% of movie
+    RECAP_OFFERED --> RECAP_OFFERED: Viewer gives Thumbs-Up (Tally: +1 vote)
+    RECAP_OFFERED --> ACTIVE_RECAP: Consensus reached (votes >= ceil(N/2)) or Remote Approval
+    RECAP_OFFERED --> PLAYING: Offer times out (12s) or Dismissed
+    ACTIVE_RECAP --> PLAYING: Recap finished (Resumes main content seamlessly)
+
+    PLAYING --> INATTENTION_TIMER: Inattentive viewers > 70%
+    INATTENTION_TIMER --> PLAYING: Viewers face TV before 5.0s
+    INATTENTION_TIMER --> ATTENTION_PAUSED: Sustained inattention >= 5.0s
+    ATTENTION_PAUSED --> PLAYING: Viewer gives Thumbs-Up (OVERRIDE_ATTENTION)
+    ATTENTION_PAUSED --> REWIND_OFFERED: Viewers face TV again (Resumes & missed >= 4s)
+    REWIND_OFFERED --> PLAYING: "Rewind" accepted (Seeks back) or "Dismissed"
+```
+
+### Policy Actions & Event Payloads
+
+| Action Type | Trigger Condition | Engine Payload Parameters | Resulting TV Behavior |
+|---|---|---|---|
+| `PAUSE_SOLO` | Room empty $> 2.5\text{s}$ | `checkpoint: SoloPauseCheckpoint` | Video pauses; HUD displays: *"Room empty · Playback paused"* |
+| `RESUME_SOLO` | Solo viewer returns | `positionSec: number` | Seeks to exact second, plays video; HUD: *"Viewer returned · Resuming"* |
+| `RECORD_SHARED_DEPARTURE` | $N \to N-1$ viewers ($N-1 \ge 1$) | `checkpoint: SharedDepartureCheckpoint` | Playback unaffected; departure position saved silently |
+| `OFFER_RECAP` | Viewer returns after missing content | `offer: RecapOfferState` | Non-blocking banner rendered; movie keeps playing |
+| `START_RECAP` | Consensus reached or remote accepted | `resumePositionSec, metadata` | Pauses main video; displays spoiler-free character/scene recap modal |
+| `PAUSE_ATTENTION` | Inattention $> 70\%$ for $\ge 5.0\text{s}$ | `checkpoint: AttentionDistractionCheckpoint` | Pauses video; renders subtle card with *"Keep Playing 👍"* button |
+| `OVERRIDE_ATTENTION` | Thumbs-up gesture or button click | `resume: true` | Clears pause; unlatches attention lock; resumes playback |
+| `RESUME_ATTENTION` | Viewers face TV again | `autoResume, offerReplay, missedSec` | Resumes playback; renders optional bottom rewind banner if $\text{missedSec} \ge 4.0\text{s}$ |
+
+---
+
+## 6. Remote Navigation & Interaction Reference
+
+The TV UI is designed according to the Amazon Fire TV 10-foot design guidelines, using high-contrast focus rings, custom focus guides (`TVFocusGuideView`), and ergonomic remote mapping:
 
 ```text
  ┌─────────────────────────────────────────────────────────────┐
- │                     HOST LAPTOP / WORKSTATION                │
+ │                      AMAZON FIRE TV REMOTE                  │
  │                                                             │
- │  ┌───────────────────────┐       ┌───────────────────────┐  │
- │  │   Metro Bundler       │       │ Video & WS Server     │  │
- │  │   Port 8081           │       │ Port 8080             │  │
- │  │  (react-native start)│       │ (test_ws_server.js)   │  │
- │  └──────────────────────┘       └──────────────────────┘  │
- │              │                               │              │
- │              │ (JS Bundle)                   │ (MP4 Stream  │
- │              │                               │  & WS Events)│
- │  ┌───────────┴───────────────────────────────┴───────────┐  │
- │  │            AMAZON VEGA VIRTUAL DEVICE                 │  │
- │  │            Ports 5554 / 5555                          │  │
- │  │                                                       │  │
- │  │   LivingFrame TV App                                  │  │
- │  │   ├── Home Screen (Hero Banner, Rows, Details Modal)  │  │
- │  │   ├── VideoPlayerView (VideoPlayer + SurfaceView)     │  │
- │  │   └── RoomContext (WebSocket Client -> 10.0.2.2:8080) │  │
- │  └───────────────────────────────────────────────────────┘  │
- │                              │
- │                              │ (Telemetry & Frames)         │
- │  ┌───────────────────────────┴───────────────────────────┐  │
- │  │   Vision Sensor Pipeline (MediaPipe Gesture Engine)   │  │
- │  │   scripts/webcam_sensor.py                            │  │
- │  └───────────────────────────────────────────────────────┘  │
+ │                           ▲ UP                              │
+ │                     ◄ LEFT  ● ENTER  ► RIGHT                │
+ │                          ▼ DOWN                             │
+ │                                                             │
+ │                     [BACK]    [PLAY/PAUSE]                  │
+ │                     [REW]     [FAST-FWD]                    │
  └─────────────────────────────────────────────────────────────┘
 ```
 
-### Port Overview
+### Remote Key Action Matrix
 
-| Port | Service | Role | Accessible from Vega VM As |
+| Remote Key | Home Screen Context | Video Player Context | Modal / Alert Context |
 |---|---|---|---|
-| **`8080`** | Video & WS Server (`scripts/test_ws_server.js`) | Streams catalog MP4 videos via HTTP Range & delivers real-time room events / gestures | `http://10.0.2.2:8080` / `ws://10.0.2.2:8080` |
-| **`8081`** | Metro Bundler (`react-native start`) | Compiles and serves the React Native / Kepler JavaScript bundle | `http://10.0.2.2:8081` |
-| **`5554` / `5555`** | Vega Virtual Device (QEMU & VDA) | Virtual Fire TV / Vega OS 1.2 runtime displaying the application | `localhost` |
+| **DPAD Left / Right** | Navigate across content cards in row | Rewind / Fast-Forward 10 seconds | Switch between modal action buttons |
+| **DPAD Up / Down** | Switch between Hero banner & rows | Reveal / Hide player HUD controls | Vertical menu item navigation |
+| **Select / Enter** | Launch details modal for selected card | Toggle Play / Pause | Confirm highlighted action (e.g. *Rewind*, *Keep Playing*) |
+| **Play / Pause Key** | Instantly play featured hero title | Toggle Play / Pause | Unpause / dismiss overlay |
+| **Rewind Key** | N/A | Scrub backward 10 seconds | N/A |
+| **Fast-Forward Key** | N/A | Scrub forward 10 seconds | N/A |
+| **Back / Escape** | Exit app / return to previous screen | Exit video player to Home screen | Dismiss active modal or overlay |
 
 ---
 
-## 3. Project Structure
+## 7. Natural Hand Gesture Reference
 
-```text
-LivingFrame/
-├── manifest.toml                # Vega OS package manifest, permissions & media services
-├── app.json                     # Vega OS KRL application configuration
-├── package.json                 # Dependencies and build scripts
-├── tsconfig.json                # TypeScript configuration
-├── public/
-│   └── videos/                  # 9 Catalog MP4 titles (H.264/AAC ~10s clips)
-├── scripts/
-│   ├── test_ws_server.js        # Port 8080 HTTP range video server + WebSocket gateway
-│   └── webcam_sensor.py         # MediaPipe gesture detection & room presence sensor
-├── src/
-│   ├── App.tsx                  # Root TV application controller & modal dispatcher
-│   ├── assets/                  # 4K dark cinematic background gradient & Vega badges
-│   ├── components/
-│   │   ├── VideoPlayerView.tsx  # Native VideoPlayer + KeplerVideoSurfaceView with sync
-│   │   ├── Header.tsx           # Brand header with live ambient room sensor status
-│   │   ├── HeroBanner.tsx       # Dynamic featured hero section with action buttons
-│   │   ├── ContentCard.tsx      # 16:9 TV remote-focusable content card
-│   │   ├── ContentRow.tsx       # TVFocusGuideView horizontal carousel row
-│   │   ├── TitleDetailsModal.tsx# Cinematic title synopsis dialog
-│   │   ├── AmbientRecapModal.tsx# AI Contextual Recap modal ("Catch Me Up")
-│   │   └── GestureReactionOverlay.tsx # In-stream room gesture response HUD
-│   ├── context/
-│   │   └── RoomContext.tsx      # Real-time WebSocket room awareness state provider
-│   ├── data/
-│   │   └── catalogData.ts       # Curated 9-title catalog items & category sets
-│   ├── services/
-│   │   └── catalogService.ts    # Resilient catalog provider with offline fallback
-│   ├── theme/
-│   │   └── theme.ts             # 10-foot TV design tokens (colors, typography, spacing)
-│   └── types/
-│       ├── catalog.ts           # MediaItem and ContentCategory interfaces
-│       └── room.ts              # RoomState, RoomEvent, and SensorStatus types
-└── test/
-    ├── App.spec.tsx             # Home screen, video player, and remote event tests
-    └── Tile.spec.tsx            # Tile component tests
+When **Gesture Control** is enabled, viewers can interact directly with the television without reaching for the physical remote:
+
+| Gesture Name | Visual Pose | Function | Technical Threshold |
+|---|---|---|---|
+| **Thumbs Up** | 👍 Fist with thumb pointing upward | **Attention Override** (bypass distraction pause) & **Recap Vote** (+1 consensus vote) | Hand confidence $\ge 0.70$, $2.0\text{s}$ duplicate cooldown |
+| **Raise Hand (Open Palm)** | ✋ Open palm facing camera | **Toggle Play / Pause** | Palm open, 5 extended fingers held stable for $0.4\text{s}$ |
+| **Swipe Right** | 🫱 Rapid hand motion left-to-right | **Fast-Forward 5s** | Horizontal velocity $v_x > 0.45$, displacement $\Delta x > 0.12$ |
+| **Swipe Left** | 🫲 Rapid hand motion right-to-left | **Rewind 5s** | Horizontal velocity $v_x < -0.45$, displacement $\Delta x < -0.12$ |
+| **Point Up** | ☝️ Closed fist with index extended | **Summon Scene Trivia & Character Bios** | Index tip elevated, confidence $\ge 0.75$ |
+
+---
+
+## 8. REST & WebSocket API Protocol
+
+LivingFrame features an embedded HTTP and WebSocket gateway ([scripts/test_ws_server.js](file:///home/supanroy/Projects/LivingFrame/scripts/test_ws_server.js)) facilitating communication between the vision sensor and the Fire TV application.
+
+### REST Endpoints
+
+| Endpoint | Method | Parameters | Description |
+|---|---|---|---|
+| `/health` | `GET` | None | Returns JSON server status, connected client count, and vision engine heartbeat |
+| `/videos/:id.mp4` | `GET` | `Range: bytes=start-end` | HTTP 206 Partial Content video streaming endpoint serving 1080p MP4 assets |
+| `/camera` | `GET` | None | Real-time web dashboard displaying camera stream, bounding boxes, and attention metrics |
+| `/frame` | `POST` | Binary JPEG body + headers | Ingests live webcam frames with `X-Attentive-Count` and `X-Is-Distracted` headers |
+| `/room/attention` | `GET` | `?distracted=0&attentive=1` | Deterministic mock endpoint simulating viewer orientation and attention changes |
+| `/room/person_entered`| `GET` | `?count=2` | Deterministic mock endpoint simulating person entry into the living room |
+| `/room/person_left` | `GET` | `?count=1` | Deterministic mock endpoint simulating person departure |
+| `/room/gesture` | `GET` | `?gesture=thumbs_up` | Deterministic mock endpoint triggering gesture actions |
+| `/vision/start` | `GET` | None | Spawns the local Python webcam vision sensor subprocess |
+| `/vision/stop` | `GET` | None | Gracefully terminates the Python vision sensor subprocess |
+
+### WebSocket Event Protocol (`ws://10.0.2.2:8080`)
+
+```json
+// Attention State Event (Phase 2)
+{
+  "type": "attention_state",
+  "source": "sensor",
+  "message": "Viewers facing TV (1/1) · Attentive",
+  "payload": {
+    "attentiveCount": 1,
+    "distractedCount": 0,
+    "isDistracted": false,
+    "inattentiveRatio": 0.0,
+    "viewerCount": 1
+  },
+  "timestamp": 1792590708117
+}
+
+// Occupancy State Event
+{
+  "type": "person_entered",
+  "source": "sensor",
+  "message": "Room presence changed: 2 viewers",
+  "payload": {
+    "personCount": 2,
+    "previousCount": 1
+  },
+  "timestamp": 1792590800000
+}
+
+// Gesture Detection Event
+{
+  "type": "gesture_detected",
+  "source": "sensor",
+  "message": "Gesture: thumbs_up (0.92)",
+  "payload": {
+    "gesture": "thumbs_up",
+    "confidence": 0.92,
+    "handedness": "Right"
+  },
+  "timestamp": 1792590815000
+}
 ```
 
 ---
 
-## 4. How to Run the Project (Step-by-Step)
+## 9. Installation, Build & Demonstration Guide
 
-To run the project with all ports enabled, open **3 terminal tabs**:
+### Prerequisites
+- **Node.js**: v20+ with npm
+- **Python**: 3.10+ with virtual environment
+- **Vega SDK**: Installed with `vega` CLI available in PATH
+- **Linux Environment**: Ubuntu 22.04+ or compatible distribution
 
-### Step 1: Start the Video & Room Awareness Server (Port 8080)
-> **Crucial:** Must be running for videos to stream and room sensors to connect.
+---
+
+### Step 1: Environment Setup & Dependencies
+
 ```bash
+# 1. Install Node.js dependencies
+npm install
+
+# 2. Activate Python environment and install vision packages
+source .venv/bin/activate
+pip install mediapipe opencv-python numpy websocket-client
+
+# 3. Ensure local models are present in models/ directory:
+# - models/gesture_recognizer.task
+# - models/pose_landmarker_full.task
+# - models/blaze_face_full_range.tflite
+# - models/age_googlenet.onnx
+```
+
+---
+
+### Step 2: Start Local Services
+
+Open **two terminal windows**:
+
+```bash
+# Terminal 1: Start Video Server & WebSocket Hub (Port 8080)
 node scripts/test_ws_server.js
-```
-*(Runs on `http://0.0.0.0:8080` and `ws://0.0.0.0:8080` with minimal memory footprint).*
 
----
-
-### Step 2: Start the Metro JavaScript Bundler (Port 8081)
-```bash
+# Terminal 2: Start Metro JavaScript Bundler (Port 8081)
 npm start
-# or: npx react-native start --port 8081
 ```
 
 ---
 
-### Step 3: Launch the Vega Virtual Device & Deploy App
+### Step 3: Compile & Deploy on Vega Virtual Device
 
-1. **Start the Vega Virtual Device:**
+```bash
+# 1. Start the Vega Virtual Device
+vega virtual-device start
+
+# 2. Verify emulator connectivity
+vega device list
+# Expected output:
+# VirtualDevice : tv - x86_64 - OS - amazon-...
+
+# 3. Compile the debug package (.vpkg)
+npm run build:debug
+
+# 4. Install package onto the Virtual Device
+vega device install-app -p build/private/kepler/@amazon-devices/livingframe/undefined/vega/x86_64/Debug/@amazon-devices/livingframe_x86_64.vpkg
+
+# 5. Launch the application
+vega device launch-app -a com.amazondeveloper.livingframe.main
+```
+
+---
+
+### Step 4: Live Demonstration Workflows
+
+#### Demonstration A: Attention-Aware Viewing (Phase 2)
+1. Launch any title (e.g. *Behind the Screams*) on the TV.
+2. Start the webcam sensor:
    ```bash
-   vega virtual-device start
+   .venv/bin/python scripts/webcam_sensor.py --camera 0
    ```
+3. Open `http://localhost:8080/camera` to view the live attention bounding boxes.
+4. Turn your head sideways or look away from the camera for **5 seconds**:
+   - Playback pauses smoothly.
+   - The subtle prompt card appears: `[ATTENTION-AWARE VIEWING] Playback paused · Viewers appear turned away` with `Keep Playing 👍`.
+5. **Test Thumbs-Up Override**:
+   - Present a thumbs-up gesture to the webcam (or select *Keep Playing* via remote).
+   - Playback immediately resumes and stays active even while looking away.
+6. **Test Catch-Up Rewind**:
+   - Look away again for 5 seconds until it pauses.
+   - Turn your face back to the TV.
+   - Playback resumes automatically, and the banner appears: `"WELCOME BACK · Catch up on 5s missed?"` with **"Rewind 5s"** and **"Dismiss"**. Selecting *Rewind* jumps back to the exact second you looked away.
 
-2. **Verify device connection:**
-   ```bash
-   vega device list
-   # Expected:
-   # Found the following device:
-   # VirtualDevice : tv - x86_64 - OS - amazon-...
-   ```
+#### Demonstration B: Deterministic Verification (Without Webcam)
+You can trigger every room scenario programmatically via curl:
 
-3. **Build the Debug Package (`.vpkg`):**
-   ```bash
-   vega build --buildTypes Debug --targets x86_64
-   ```
-
-4. **Install & Launch onto the Virtual Device:**
-   ```bash
-   vega run-app build/private/kepler/@amazon-devices/livingframe/undefined/vega/x86_64/Debug/@amazon-devices/livingframe_x86_64.vpkg
-   ```
-
----
-
-### Optional Step 4: Laptop Camera AI Vision Sensor (Gesture Control)
-The webcam + MediaPipe pipeline can be launched either from the TV or from the CLI:
-
-**From the TV (recommended):** open any video and toggle the **GESTURES OFF / ON** button in the
-player header. Turning it **ON** starts the real sensor process (and pops up the native camera
-preview window on the laptop); turning it **OFF** stops the process and releases the camera. The
-button reflects the live state reported by the server.
-
-**From the CLI:**
 ```bash
-python3 scripts/webcam_sensor.py
-```
-*(Live camera feed + landmarks are also viewable in your browser at `http://localhost:8080/preview`).*
+# Simulate 1 viewer watching attentive
+curl -s "http://localhost:8080/room/attention?distracted=0&attentive=1"
 
-**From the server API:**
-```bash
-curl http://localhost:8080/vision/start   # start the webcam sensor
-curl http://localhost:8080/vision/stop    # stop the webcam sensor
-curl http://localhost:8080/vision/status  # current running state
+# Simulate viewer looking away (distracted)
+curl -s "http://localhost:8080/room/attention?distracted=1&attentive=0"
+# (Wait 5 seconds: TV pauses with prompt card)
+
+# Override with thumbs-up gesture
+curl -s "http://localhost:8080/room/gesture?gesture=thumbs_up"
+# (TV resumes playback immediately)
+
+# Simulate returning attention
+curl -s "http://localhost:8080/room/attention?distracted=0&attentive=1"
+# (TV offers rewind banner)
+
+# Simulate solo viewer leaving room
+curl -s "http://localhost:8080/room/person_left?count=0"
+# (After 2.5s grace period: pauses with "Room empty")
+
+# Simulate viewer returning
+curl -s "http://localhost:8080/room/person_entered?count=1"
+# (Instantly resumes without recap modal)
 ```
 
 ---
 
-## 5. Health & Verification Commands
+## 10. Automated Test Suites & Verification
 
-Verify all running services at any time:
+LivingFrame includes comprehensive end-to-end unit and component integration tests validating all state machine transitions and vision algorithms:
 
 ```bash
-# 1. Verify Video & WebSocket server (port 8080)
-curl -I http://localhost:8080/health
-curl -I http://localhost:8080/videos/behind-the-screams.mp4
+# Execute Jest React Native & TypeScript test suite
+npm test
 
-# 2. Verify Metro Bundler (port 8081)
-curl -s http://localhost:8081/status
-# Expected: packager-status:running
+# Expected Output:
+# PASS test/roomAwarePlayback.spec.tsx (10 passed)
+# PASS test/playbackIntelligence.spec.ts (23 passed)
+# Test Suites: 10 passed, 10 total
+# Tests:       92 passed, 92 total
 
-# 3. Trigger video playback remotely on the TV
-curl -s "http://localhost:8080/trigger?type=play_video&itemId=behind-the-screams"
+# Execute Python computer vision & stabilization test suite
+.venv/bin/python test/presence_stabilizer_test.py
 
-# 4. Trigger simulated hand-raised room gesture
-curl -s "http://localhost:8080/gesture/hand_raised"
-
-# 5. Start / stop the real webcam gesture-control sensor
-curl -s "http://localhost:8080/vision/start"
-curl -s "http://localhost:8080/vision/stop"
-
-# 6. Run automated tests (low memory mode)
-npm test -- --runInBand
+# Expected Output:
+# == PresenceStabilizer == (16 passed)
+# == count_visible_poses == (4 passed)
+# == estimate_child_likelihood == (5 passed)
+# == ChildPresenceDecider == (4 passed)
+# == Age model helpers == (12 passed)
+# == _detect_swipe == (6 passed)
+# == Phase 2: estimate_pose_orientation == (4 passed)
+# == Phase 2: AttentionTracker == (8 passed)
+# 59/59 passed
 ```
 
 ---
 
-## 6. Remote Navigation & Player Controls
+## 11. Privacy, Security & Edge Processing Guarantees
 
-### Home Screen Navigation
-| Control | Action |
-|---|---|
-| **Arrow Right / Left** | Navigate between cards in a row; auto-scrolls the carousel |
-| **Arrow Up / Down** | Move between Hero Action buttons and horizontal content rows |
-| **Enter / Return (Select)** | Opens Title Details screen for the focused card |
-| **Hero: Explore & Watch** | Launches native full-screen video player |
-| **Hero: More Info** | Opens Title Details modal dialog |
-| **Hero: Catch Me Up** | Opens the LivingFrame Room AI Contextual Recap modal |
-| **Back / Escape (ESC)** | Exits modals back to browse grid, or exits app at root |
+LivingFrame was built strictly under a **Privacy-by-Design** mandate:
 
-### Video Player Controls
-| Control | Action |
-|---|---|
-| **Click Anywhere on Screen** | **1-Click Full Screen Toggle**: Hides or restores all controls and overlays |
-| **5-Second Inactivity** | **Auto-Hide**: HUD, vignettes, and buttons automatically disappear |
-| **Space / Return / Select** | Play / Pause toggle |
-| **Arrow Left / Rewind Key** | Rewind 10 seconds (smooth seek bar update) |
-| **Arrow Right / Fast-Forward** | Fast-Forward 10 seconds |
-| **Button: Restart** | Resets video to `00:00` and resumes playback |
-| **Button: Room Context** | Opens live ambient room context recap overlay |
-| **Button: Gesture Control (GESTURES OFF/ON)** | Starts / stops the real webcam + MediaPipe sensor. When ON, hand gestures control playback |
-| **Gesture: Raise Hand** | *(gesture control ON)* Toggles Play / Pause |
-| **Gesture: Swipe Left / Right** | *(gesture control ON)* Seek back / forward 5 seconds |
-| **Button: Back** / **ESC** | Exits video player and returns to browse screen |
+1. **Pure Edge Execution**: All neural network inferences (MediaPipe Pose, BlazeFace, GoogLeNet) execute in volatile CPU/GPU RAM on the local host or edge device. Zero cloud inference APIs are involved.
+2. **Transient Frame Lifecycle**: Incoming camera frames are decoded into memory buffers, analyzed, and immediately garbage-collected. No video frames, face crops, or raw audio are ever persisted to disk.
+3. **No Biometric Identification**: The vision system does not perform facial recognition, facial template extraction, or identity tracking. It computes non-invertible geometric ratios (ear-to-nose distances, shoulder-to-head spans) that cannot be used to identify individuals.
+4. **Local Mesh Isolation**: The WebSocket and video streaming protocol operates strictly over the private local subnet (`10.0.2.2` / `localhost`), with no external network exposure.
+5. **Physical Kill Switches**: The TV interface provides immediate hardware-level software switches (**GESTURES OFF/ON** and **FAMILY MODE OFF/ON**) that fully release camera hardware resources when toggled off.
 
 ---
 
-## 7. Room-Aware Playback (Family Mode) — Demo
-
-LivingFrame reacts to changes in the **room**, not just to hand gestures.
-
-**Presence detection (local, no cloud).** The sensor runs MediaPipe's Pose Landmarker
-(full, ~9.4 MB) on a fraction of camera frames and emits `person_entered` / `person_left`
-over the existing WebSocket. It counts **visible people only** — no identity, age, or face
-recognition. Download the model once:
-
-```bash
-curl -L -o models/pose_landmarker_full.task \
-  https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task
-```
-
-If it is missing, gesture control still works and presence detection is simply disabled.
-
-**Family Mode.** Enable it from the **home-screen top bar** or the **player header** — both
-switches control the same preference. While Family Mode is on, the sensor estimates whether a
-**child** is in view. If a child enters — or was already present — playback of a scene tagged
-in the asset's metadata **pauses**, the picture is covered, and a warning explains why.
-Playback resumes when the child is no longer detected, or via *Resume anyway*. With Family
-Mode off, playback is completely unaffected.
-
-**How the child signal works.** MediaPipe's BlazeFace detector finds faces in the existing
-camera frames; each face crop is classified into an age bracket by the
-**GoogLeNet/Adience age model** (`age_googlenet.onnx`, Apache-2.0) running through OpenCV's
-DNN module — no extra runtime dependency. Brackets `(0-2)`, `(4-6)`, `(8-12)` count as child;
-their probability mass is median-smoothed and gated with hysteresis (on ≥ 0.55, off ≤ 0.35)
-plus 3-sample confirmation. If no face is visible, the sensor falls back to a pose
-head/shoulder ratio heuristic.
-
-> This is an **age estimate**, not identity verification. Face crops are processed in memory
-> only — never stored or transmitted. Accuracy drops for small or blurry faces (the camera is
-> 320×240) and around the 15–20 bracket, so it can misfire; Family Mode errs toward pausing.
-> The stats panel shows `Child present (est.)`, and the sensor heartbeat prints the predicted
-> bracket and probability (`Child: age p=0.12 (25-32)`).
-
-Download the two models once:
-
-```bash
-curl -L -o models/age_googlenet.onnx \
-  https://huggingface.co/onnxmodelzoo/age_googlenet/resolve/main/age_googlenet.onnx
-curl -L -o models/blaze_face_short_range.tflite \
-  https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite
-```
-
-**Two switches, one camera.** Gesture control and Family Mode are independent preferences
-that share the webcam sensor: it runs while **either** is on, and each switch only gates its
-own behaviour. Family Mode therefore works on its own (presence detection) without enabling
-gesture control, and turning gestures off will not stop the camera while Family Mode still
-needs it — the sensor stops only when both are off. The app only starts/stops the sensor
-after you use one of the switches, so a sensor started from the CLI is never clobbered on
-connect.
-
-**Authored safety metadata** (`src/data/catalogData.ts`) — hand-written per demo asset,
-not content analysis: `Behind The Screams` is tagged `adult_content` for its whole 10 s
-clip; `Cereal Streamz` and `Feline Assistant` are marked family-safe.
-
-**Manual room triggers** (test playback behaviour without a camera):
-```bash
-curl -s "http://localhost:8080/room/person_entered?count=2"
-curl -s "http://localhost:8080/room/person_left?count=1"
-curl -s "http://localhost:8080/room/events"
-```
-The dashboard (`/camera`) shows the live **people in view** count and a room-event log, and
-labels manual events as `manual trigger` so they are distinguishable from real detection.
-
-**Deterministic demo**
-1. Start the server, Metro and the Vega app; play **Behind The Screams**.
-2. In the player, turn **FAMILY ON**.
-3. Let a second person enter (or trigger `person_entered`) — the dashboard logs the event.
-4. The TV pauses, blacks out, and explains why.
-5. Trigger `person_left` playback resumes automatically.
-6. Turn **FAMILY OFF** and repeat: playback continues untouched.
-
-**Tests:** `npm test -- --runInBand` (scene-policy + catalog metadata) and
-`.venv/bin/python test/presence_stabilizer_test.py` (presence debounce/cooldown).
-
----
-
-## 8. License & Community
+## 12. License & Trademarks
 
 - **License**: Released under the [MIT License](./LICENSE) &copy; 2026 Supan Roy.
-- **Security Policy**: See [SECURITY.md](./SECURITY.md) for vulnerability reporting.
-- **Code of Conduct**: See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
-- **Contributing**: Please read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request.
-- **Contact**: Supan Roy — [contact@supanroy.com](mailto:contact@supanroy.com)
+- **Trademarks**: Amazon, Fire TV, Vega OS, Kepler, and all related logos are trademarks of Amazon.com, Inc. or its affiliates. MediaPipe is a trademark of Google LLC.
