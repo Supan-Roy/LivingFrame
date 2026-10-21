@@ -679,6 +679,23 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ status: 'event_dispatched', source: 'manual', clientsNotified: notified, event: manualPayload }));
       return;
     }
+
+    if (url.startsWith('/room/family_mode')) {
+      const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      const enabled = parsedUrl.searchParams.get('enabled') !== '0';
+      const fmPayload = {
+        type: 'set_family_mode',
+        enabled,
+        source: 'manual',
+        message: `Family Mode ${enabled ? 'enabled' : 'disabled'} (manual)`,
+        timestamp: Date.now(),
+      };
+      const notified = broadcast(fmPayload);
+      console.log(`[ROOM] Family mode set to ${enabled} -> ${notified} client(s)`);
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ status: 'event_dispatched', familyModeEnabled: enabled, clientsNotified: notified }));
+      return;
+    }
   }
 
   // Handle gesture trigger and manual test endpoints (GET or POST)

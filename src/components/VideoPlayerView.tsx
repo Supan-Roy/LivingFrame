@@ -17,7 +17,7 @@ import {
   VideoPlayer,
   KeplerVideoSurfaceView,
 } from '@amazon-devices/react-native-w3cmedia';
-import {MediaItem, TitleRecapMetadata} from '../types/catalog';
+import {MediaItem, TitleRecapMetadata, SceneSafetySegment} from '../types/catalog';
 import {colors} from '../theme/theme';
 import {useRoom} from '../context/RoomContext';
 import {findBlockingSegment} from '../room/scenePolicy';
@@ -135,6 +135,7 @@ export const VideoPlayerView = ({
 
   // --- Family Mode / room-aware protection state ---
   const [protectionOverride, setProtectionOverride] = useState<boolean>(false);
+  const [focusedProtectionBtn, setFocusedProtectionBtn] = useState<'resume' | 'exit'>('resume');
   const pausedByProtectionRef = useRef<boolean>(false);
   const lastRoomEventIdRef = useRef<string | null>(roomState.lastEvent?.id ?? null);
 
@@ -731,7 +732,28 @@ export const VideoPlayerView = ({
   // --- Family Mode / room-aware protection --------------------------------
   // A child in the room (detected, or already present when Family Mode is switched on)
   // is what arms the policy. `childPresent` is a body-proportion estimate, not identity.
-  const safetySegments = item?.sceneSafety ?? [];
+  const rawSafetySegments = (item?.sceneSafety && item.sceneSafety.length > 0)
+    ? item.sceneSafety
+    : (item?.id === 'behind-the-screams' || item?.contentRating === 'TV-14' || item?.contentRating === 'TV-MA' || item?.category === 'Horror')
+      ? [{
+          startSec: 0,
+          endSec: durationSec || 86400,
+          category: 'adult_content' as const,
+          action: 'pause' as const,
+          resumeSec: 0,
+          note: 'Content rated TV-14/TV-MA or Horror not suitable for children',
+        }]
+      : [];
+
+  const safetySegments: SceneSafetySegment[] = rawSafetySegments.map(s => ({
+    ...s,
+    // For adult content or Behind The Screams, ensure protection spans the entire movie
+    // so it doesn't prematurely expire after a 10s demo window
+    endSec: (item?.id === 'behind-the-screams' || s.category === 'adult_content')
+      ? Math.max(s.endSec, durationSec || 86400)
+      : s.endSec,
+  }));
+
   const blockedSegment = findBlockingSegment({
     familyModeEnabled: roomState.familyModeEnabled,
     armed: roomState.childPresent,
@@ -884,8 +906,16 @@ export const VideoPlayerView = ({
     if (isProtectionBlocked) {
       if (eventType === 'back') {
         onClose();
+      } else if (eventType === 'left') {
+        setFocusedProtectionBtn('resume');
+      } else if (eventType === 'right') {
+        setFocusedProtectionBtn('exit');
       } else if (eventType === 'select') {
-        setProtectionOverride(true);
+        if (focusedProtectionBtn === 'exit') {
+          onClose();
+        } else {
+          setProtectionOverride(true);
+        }
       }
       return;
     }
@@ -1415,10 +1445,15 @@ export const VideoPlayerView = ({
             </Text>
             <TVFocusGuideView style={styles.protectionActions}>
               <Pressable
-                style={styles.protectionResumeBtn}
+                style={[
+                  styles.protectionResumeBtn,
+                  focusedProtectionBtn === 'resume' && styles.protectionResumeBtnFocused,
+                ]}
+                onFocus={() => setFocusedProtectionBtn('resume')}
                 onPress={() => setProtectionOverride(true)}
                 accessibilityRole="button"
                 accessibilityLabel="Continue anyway"
+                hasTVPreferredFocus
                 testID="btn-protection-resume">
                 <View style={styles.protectionResumeIcon}>
                   <Icon name="play" size={13} color="#0F172A" />
@@ -1426,7 +1461,11 @@ export const VideoPlayerView = ({
                 <Text style={styles.protectionResumeText}>Continue anyway</Text>
               </Pressable>
               <Pressable
-                style={styles.protectionExitBtn}
+                style={[
+                  styles.protectionExitBtn,
+                  focusedProtectionBtn === 'exit' && styles.protectionExitBtnFocused,
+                ]}
+                onFocus={() => setFocusedProtectionBtn('exit')}
                 onPress={onClose}
                 accessibilityRole="button"
                 accessibilityLabel="Exit"
@@ -1774,18 +1813,24 @@ const styles = StyleSheet.create({
   },
   protectionOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#000000',
+    backgroundColor: 'rgba(5, 8, 16, 0.98)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 200,
+    elevation: 200,
   },
   protectionCard: {
     width: 760,
-    backgroundColor: 'rgba(15, 23, 42, 0.98)',
+    backgroundColor: '#0F172A',
     borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: 'rgba(245, 158, 11, 0.6)',
+    borderWidth: 2,
+    borderColor: '#F59E0B',
     padding: 36,
+    shadowColor: '#F59E0B',
+    shadowOffset: {width: 0, height: 0},
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    elevation: 210,
   },
   protectionBadge: {
     fontSize: 11,
@@ -1819,10 +1864,18 @@ const styles = StyleSheet.create({
   protectionResumeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 26,
+    paddingVertical: 13,
     borderRadius: 10,
+  },
+  protectionResumeBtnFocused: {
+    backgroundColor: '#FFFFFF',
+    transform: [{scale: 1.05}],
+    shadowColor: '#F59E0B',
+    shadowOffset: {width: 0, height: 4},
+    shadowOpacity: 0.6,
+    shadowRadius: 12,
   },
   protectionResumeIcon: {
     marginRight: 8,
@@ -1841,6 +1894,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 10,
+  },
+  protectionExitBtnFocused: {
+    backgroundColor: 'rgba(71, 85, 105, 0.95)',
+    borderColor: '#FFFFFF',
+    transform: [{scale: 1.05}],
   },
   protectionExitIcon: {
     marginRight: 8,

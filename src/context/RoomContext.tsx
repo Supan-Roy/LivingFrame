@@ -233,46 +233,78 @@ export const RoomProvider = ({children}: {children: ReactNode}) => {
           } else if (parsed.type === 'person_entered' || parsed.type === 'person_left') {
             const count =
               parsed.payload?.personCount ?? parsed.payload?.count ?? parsed.count;
-            console.log(
-              `[LivingFrame WS] ROOM EVENT: ${parsed.type} (${count} in view, source=${
-                parsed.source || 'webcam'
-              }${parsed.payload?.childPresent ? ', child detected' : ''})`,
-            );
-            setRoomState((prev) => ({
-              ...prev,
-              viewersPresent: typeof count === 'number' ? count : prev.viewersPresent,
-              childPresent:
+            setRoomState((prev) => {
+              const childDetected =
                 typeof parsed.payload?.childPresent === 'boolean'
                   ? parsed.payload.childPresent
-                  : prev.childPresent,
-              lastEvent: {
-                id: `evt-${Date.now()}-${++eventSeqRef.current}`,
-                type: parsed.type,
-                timestamp: parsed.timestamp || Date.now(),
-                payload: {
-                  ...(parsed.payload || {}),
-                  personCount: typeof count === 'number' ? count : undefined,
-                  source: parsed.source || 'webcam',
+                  : typeof parsed.childPresent === 'boolean'
+                  ? parsed.childPresent
+                  : typeof parsed.payload?.childCount === 'number'
+                  ? parsed.payload.childCount > 0
+                  : typeof parsed.payload?.child === 'number'
+                  ? parsed.payload.child > 0
+                  : prev.childPresent;
+              console.log(
+                `[LivingFrame WS] ROOM EVENT: ${parsed.type} (${count} in view, source=${
+                  parsed.source || 'webcam'
+                }${childDetected ? ', child detected' : ''})`,
+              );
+              return {
+                ...prev,
+                viewersPresent: typeof count === 'number' ? count : prev.viewersPresent,
+                childPresent: childDetected,
+                lastEvent: {
+                  id: `evt-${Date.now()}-${++eventSeqRef.current}`,
+                  type: parsed.type,
+                  timestamp: parsed.timestamp || Date.now(),
+                  payload: {
+                    ...(parsed.payload || {}),
+                    personCount: typeof count === 'number' ? count : undefined,
+                    source: parsed.source || 'webcam',
+                    childPresent: childDetected,
+                  },
                 },
-              },
-            }));
+              };
+            });
           } else if (parsed.type === 'room_state') {
             // Current head-count only — deliberately does not set lastEvent, so it can
             // never be mistaken for an entry/leave and trigger the Family Mode policy.
             const count = parsed.payload?.personCount ?? parsed.payload?.count;
-            setRoomState((prev) => ({
-              ...prev,
-              viewersPresent: typeof count === 'number' ? count : prev.viewersPresent,
-              childPresent:
+            setRoomState((prev) => {
+              const childDetected =
                 typeof parsed.payload?.childPresent === 'boolean'
                   ? parsed.payload.childPresent
-                  : prev.childPresent,
-            }));
+                  : typeof parsed.childPresent === 'boolean'
+                  ? parsed.childPresent
+                  : typeof parsed.payload?.childCount === 'number'
+                  ? parsed.payload.childCount > 0
+                  : typeof parsed.payload?.child === 'number'
+                  ? parsed.payload.child > 0
+                  : prev.childPresent;
+              return {
+                ...prev,
+                viewersPresent: typeof count === 'number' ? count : prev.viewersPresent,
+                childPresent: childDetected,
+              };
+            });
           } else if (parsed.type === 'vision_status') {
             console.log(`[LivingFrame WS] VISION STATUS: enabled=${!!parsed.enabled}`);
             setRoomState((prev) => ({
               ...prev,
               visionEnabled: !!parsed.enabled,
+            }));
+          } else if (parsed.type === 'set_family_mode' || parsed.type === 'family_mode') {
+            const enabled =
+              typeof parsed.enabled === 'boolean'
+                ? parsed.enabled
+                : typeof parsed.payload?.enabled === 'boolean'
+                ? parsed.payload.enabled
+                : true;
+            console.log(`[LivingFrame WS] FAMILY MODE COMMAND: enabled=${enabled}`);
+            userVisionPrefRef.current = true;
+            setRoomState((prev) => ({
+              ...prev,
+              familyModeEnabled: enabled,
             }));
           }
         } catch (err) {
