@@ -5,6 +5,7 @@ build/
 buildinfo.json
 generated/
 *.vpkg
+*.zip
 CMakeUserPresets.json
 
 # Logs
