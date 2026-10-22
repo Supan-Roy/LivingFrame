@@ -562,7 +562,7 @@ export class RoomPlaybackEngine {
    * Viewer override: If any viewer gives a thumbs-up (or selects "Keep Playing"),
    * allows playback to continue even if the majority remains turned away.
    */
-  public overrideAttention(nowMs: number = Date.now()): PlaybackPolicyAction {
+  public overrideAttention(_nowMs: number = Date.now()): PlaybackPolicyAction {
     this.attentionOverride = true;
     this.attentionInattentiveSinceMs = null;
     if (this.attentionPaused) {

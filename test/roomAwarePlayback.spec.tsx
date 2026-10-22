@@ -563,5 +563,6 @@ describe('Room-Aware Playback Intelligence - Component Integration', () => {
     fireEvent.press(rewindBtn);
 
     expect(screen.queryByTestId('attention-replay-banner')).toBeNull();
+    expect(player.play).toHaveBeenCalled();
   });
 });

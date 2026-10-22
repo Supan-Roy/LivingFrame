@@ -834,7 +834,7 @@ export const VideoPlayerView = ({
       }
     }, 200);
     return () => clearInterval(interval);
-  }, [handlePolicyAction, attentionReplayOffer]);
+  }, [handlePolicyAction, attentionReplayOffer, durationSec, item]);
 
   // --- Family Mode / room-aware protection --------------------------------
   // A child in the room (detected, or already present when Family Mode is switched on)
