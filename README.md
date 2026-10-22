@@ -28,20 +28,6 @@ LivingFrame eliminates these frictions autonomously:
 
 ---
 
-## 📖 Deep-Dive Technical Documentation
-
-For evaluators and developers looking for exhaustive engineering specifications, LivingFrame includes dedicated architectural deep-dives in the [`docs/`](./docs) directory:
-
-| Document | Focus & Key Topics Covered |
-|:---|:---|
-| 📐 [**System Architecture**](./docs/ARCHITECTURE.md) | Decoupled edge sensory topology, Vega OS package manifest (`manifest.toml`), Kepler W3C Media pipeline, and local WebSocket/HTTP mesh |
-| 👁️ [**On-Device Vision Pipeline**](./docs/VISION_PIPELINE.md) | 3D landmark geometry (nose-ear yaw ratio & Z-depth), multi-model edge deployment, 7-frame median filter, and dual-hysteresis child classification |
-| ⏱️ [**Playback Intelligence Specification**](./docs/PLAYBACK_INTELLIGENCE.md) | Deterministic state machine, solo departure grace periods, shared viewing arrival recaps, consensus voting math, and attention-aware playback |
-| 🔌 [**System API & Protocol Reference**](./docs/API_REFERENCE.md) | Complete JSON schema specifications for WebSocket events (`/room/state`), REST endpoints, and media catalog structures |
-| 📝 [**Developer Friction Log & Suggestions**](./docs/FRICTION_LOG.md) | Detailed evaluation of Vega OS & Kepler SDK, native surface race conditions, React 18 focus bleed, and actionable feature requests for Amazon |
-
----
-
 ## 2. End-to-End System Architecture
 
 LivingFrame is architected as a distributed local mesh connecting the **Amazon Vega OS Runtime** with local media services and an on-device computer vision engine.
@@ -502,7 +488,21 @@ npm test
 
 ---
 
-## 11. Privacy, Security & Edge Processing Guarantees
+## 11. Technical Documentation
+
+Additional technical specifications and documentation are available in the [`docs/`](./docs) directory:
+
+| Document | Focus & Key Topics Covered |
+|:---|:---|
+| [**System Architecture**](./docs/ARCHITECTURE.md) | Decoupled edge sensory topology, Vega OS package manifest (`manifest.toml`), Kepler W3C Media pipeline, and local WebSocket/HTTP mesh |
+| [**On-Device Vision Pipeline**](./docs/VISION_PIPELINE.md) | 3D landmark geometry (nose-ear yaw ratio & Z-depth), multi-model edge deployment, 7-frame median filter, and dual-hysteresis child classification |
+| [**Playback Intelligence Specification**](./docs/PLAYBACK_INTELLIGENCE.md) | Deterministic state machine, solo departure grace periods, shared viewing arrival recaps, consensus voting math, and attention-aware playback |
+| [**System API & Protocol Reference**](./docs/API_REFERENCE.md) | Complete JSON schema specifications for WebSocket events (`/room/state`), REST endpoints, and media catalog structures |
+| [**Developer Friction Log & Suggestions**](./docs/FRICTION_LOG.md) | Detailed evaluation of Vega OS & Kepler SDK, native surface race conditions, React 18 focus bleed, and actionable feature requests for Amazon |
+
+---
+
+## 12. Privacy, Security & Edge Processing Guarantees
 
 LivingFrame was built strictly under a **Privacy-by-Design** mandate:
 
@@ -514,7 +514,7 @@ LivingFrame was built strictly under a **Privacy-by-Design** mandate:
 
 ---
 
-## 12. License & Trademarks
+## 13. License & Trademarks
 
 - **License**: Released under the [MIT License](./LICENSE) &copy; 2026 Supan Roy.
 - **Trademarks**: Amazon, Fire TV, Vega OS, Kepler, and all related logos are trademarks of Amazon.com, Inc. or its affiliates. MediaPipe is a trademark of Google LLC.
