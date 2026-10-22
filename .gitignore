@@ -47,5 +47,7 @@ models/*.tflite
 *.bak
 .commandcode/
 !src/assets/**
+!public/videos/**
+!public/videos/*.mp4
 captures/
 screenshots/
