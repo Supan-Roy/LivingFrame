@@ -266,13 +266,17 @@ The TV UI is designed according to the Amazon Fire TV 10-foot design guidelines,
 
 When **Gesture Control** is enabled, viewers can interact directly with the television without reaching for the physical remote:
 
-| Gesture Name | Visual Pose | Function | Technical Threshold |
-|---|---|---|---|
-| **Thumbs Up** | 👍 Fist with thumb pointing upward | **Attention Override** (bypass distraction pause) & **Recap Vote** (+1 consensus vote) | Hand confidence $\ge 0.70$, $2.0\text{s}$ duplicate cooldown |
-| **Raise Hand (Open Palm)** | ✋ Open palm facing camera | **Toggle Play / Pause** | Palm open, 5 extended fingers held stable for $0.4\text{s}$ |
-| **Swipe Right** | 🫱 Rapid hand motion left-to-right | **Fast-Forward 5s** | Horizontal velocity $v_x > 0.45$, displacement $\Delta x > 0.12$ |
-| **Swipe Left** | 🫲 Rapid hand motion right-to-left | **Rewind 5s** | Horizontal velocity $v_x < -0.45$, displacement $\Delta x < -0.12$ |
-| **Point Up** | ☝️ Closed fist with index extended | **Summon Scene Trivia & Character Bios** | Index tip elevated, confidence $\ge 0.75$ |
+| Gesture Name | Visual Pose | Screen Context | Action / Function | Technical Threshold |
+|---|---|---|---|---|
+| **Thumbs Up** | Fist with thumb pointed upward | Browse Screen | **Select & Play** highlighted title | MediaPipe confidence $\ge 0.70$, cooldown $1.0\text{s}$ |
+| **Thumbs Up** | Fist with thumb pointed upward | Video Playback | **Recap Vote** (+1 consensus vote) & **Attention Override** (keep playing) | MediaPipe confidence $\ge 0.70$, cooldown $1.0\text{s}$ |
+| **Raise Hand** | Open palm held steady facing camera | Video Playback | **Toggle Play / Pause** | Open palm held stable, motion displacement $< 0.05$ |
+| **Swipe Right** | Hand motion left-to-right | Browse Screen | **Move Focus Right** to next title card | Horizontal displacement $\Delta x > 0.10$, cooldown $0.6\text{s}$ |
+| **Swipe Right** | Hand motion left-to-right | Video Playback | **Fast-Forward 5s** | Horizontal displacement $\Delta x > 0.10$, cooldown $0.6\text{s}$ |
+| **Swipe Left** | Hand motion right-to-left | Browse Screen | **Move Focus Left** to previous title card | Horizontal displacement $\Delta x < -0.10$, cooldown $0.6\text{s}$ |
+| **Swipe Left** | Hand motion right-to-left | Video Playback | **Rewind 5s** | Horizontal displacement $\Delta x < -0.10$, cooldown $0.6\text{s}$ |
+| **Swipe Down** | Hand motion top-to-bottom | Browse Screen | **Navigate Down** to next category row | Vertical displacement $\Delta y > 0.08$, cooldown $0.6\text{s}$ |
+| **Swipe Up** | Hand motion bottom-to-top | Browse Screen | **Navigate Up** to previous row / Hero banner | Vertical displacement $\Delta y < -0.08$, cooldown $0.6\text{s}$ |
 
 ---
 
