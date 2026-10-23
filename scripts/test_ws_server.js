@@ -755,7 +755,7 @@ const server = http.createServer((req, res) => {
   }
 
   // Handle gesture trigger and manual test endpoints (GET or POST)
-  if (url.startsWith('/gesture/') || url.startsWith('/trigger') || url === '/event') {
+  if (url.startsWith('/gesture/') || url.startsWith('/trigger') || url === '/event' || url.startsWith('/room/gesture')) {
     if (req.method === 'POST') {
       let body = '';
       req.on('data', chunk => { body += chunk; });

@@ -780,6 +780,8 @@ class WebcamSensor:
         simulate_mode=False,
         preview=True
     ):
+        if str(device).isdigit():
+            device = f'/dev/video{device}'
         self.device = device
         self.server_url = server_url.rstrip('/')
         self.engine = engine.lower()
@@ -1771,7 +1773,7 @@ def main():
     parser.add_argument('--model', default=DEFAULT_MODEL, help='Path to MediaPipe gesture_recognizer.task model')
     parser.add_argument('--pose-model', default=DEFAULT_POSE_MODEL, help='Path to MediaPipe pose_landmarker_full.task model (room presence)')
     parser.add_argument('--confidence', type=float, default=0.55, help='Minimum confidence threshold for ML gesture detection (default: 0.55)')
-    parser.add_argument('--device', default=DEFAULT_DEVICE, help='V4L2 camera device (default: /dev/video0)')
+    parser.add_argument('--device', '--camera', default=DEFAULT_DEVICE, help='V4L2 camera device or index (default: /dev/video0)')
     parser.add_argument('--server', default=DEFAULT_SERVER, help='WebSocket/HTTP server URL (default: http://localhost:8080)')
     parser.add_argument('--manual', action='store_true', help='Run in manual keypress trigger fallback mode')
     parser.add_argument('--simulate', action='store_true', help='Periodically simulate hand gestures')
